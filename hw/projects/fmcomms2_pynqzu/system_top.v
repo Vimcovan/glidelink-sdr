@@ -73,6 +73,7 @@ module system_top (
   // instantiations
 
   system_wrapper i_system_wrapper (
+    .ctrl_out (gpio_status),
     .enable (enable),
     .gpio_i (gpio_i),
     .gpio_o (gpio_o),

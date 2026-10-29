@@ -67,6 +67,17 @@ int main(int argc, char **argv)
 		fprintf(stderr, "AD9361 IIO devices not found\n");
 		return 1;
 	}
+	// shell 1.1 and later: this test uses host port 0 raw, and a program that
+	// was killed may have left the packet headers on (CONFIG bits 2 / 3) or a
+	// packet cut off in the shell, so clear the headers and flush the port
+	struct iio_device *shell = iio_context_find_device(ctx, "glidelink-shell");
+	uint32_t version = 0, cfg = 0;
+	if (shell && iio_device_reg_read(shell, 0x004, &version) == 0 && version >= 0x00010100 &&
+	    iio_device_reg_read(shell, 0x054, &cfg) == 0) {
+		iio_device_reg_write(shell, 0x054, cfg & ~0xcu);
+		iio_device_reg_write(shell, 0x05C, 3);
+	}
+
 	iio_channel_attr_write_longlong(iio_device_find_channel(phy, "voltage0", false),
 					"sampling_frequency", rate);
 	iio_device_debug_attr_write(phy, "loopback", "1");

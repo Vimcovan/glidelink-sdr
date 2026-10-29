@@ -8,8 +8,9 @@
 | 路径 | 内容 |
 |---|---|
 | `adi-patches/` | 对 ADI HDL 的补丁 |
+| `library/glidelink_shell/` | PL 外壳：寄存器、RX / TX 流化（时间戳、定时发送）、流交换、槽位 0（直通模块）、主机端口包头适配；`tb/` 为 xsim 测试平台（`run_sim.ps1 <tb>`）。设计见 `docs/phase1_shell.md` |
 | `projects/common/pynqzu/` | PYNQ-ZU 载板部分：PS 配置（`ps_config_list.txt`，取自板上 PYNQ 镜像）与 `pynqzu_system_bd.tcl` |
-| `projects/fmcomms2_pynqzu/` | AD9361 FMC 子卡工程：block design、顶层、引脚约束 |
+| `projects/fmcomms2_pynqzu/` | AD9361 FMC 子卡工程：block design（`glidelink_bd.tcl`，由 ADI fmcomms2 改写，外壳代替 ADI 的 FIFO 与打包 / 拆包）、顶层、引脚与跨时钟域约束 |
 | `dts/` | 与比特流配套的设备树叠加 |
 | `scripts/` | 打补丁、打包 ADI IP、板上加载比特流与叠加的脚本 |
 
@@ -29,6 +30,11 @@
 - 设备树叠加中外设总线的 compatible 用 `simple-pm-bus`：6.6 内核对叠加加入的纯 `simple-bus` 节点不创建子设备。
   ADI `adi-fmcomms2.dtsi` 中 40 MHz 参考时钟所在的 `/clocks` 节点也要是 `simple-pm-bus`，`build_dtbo.sh` 编译时把
   compatible 直接加进该节点：另写一个片段修改 `/clocks` 时，内核以"多个片段添加同一节点"拒绝整个叠加。
+- 采样率上限 50 MSPS。61.44 MSPS 时 AD9361 数据接口时钟为 245.76 MHz（2R2T 与 1R1T 相同），第三方子卡上 TX 线对
+  D4 / D5（D5 即 P/N 对调的一对）的眼图过窄：TX 只在 I 的高半字上出错，ADI 驱动在 61.44 MSPS 下做的 TX 调校在所有
+  延时下都失败。设备树叠加因此跳过 TX 调校（`adi,digital-interface-tune-skip-mode = <2>`），用 dtsi 中的固定 TX 延时，
+  50 MSPS 以内逐样点无错；Soapy 模块拒绝高于 50 MSPS 的采样率。余量随每次布局布线变化，每个新比特流都要在板上用
+  `sw/tests/ramp_loopback_iio` 以 50 MSPS 核对一次。
 - AD9361 的 LVDS 极性寄存器（0x03D / 0x03E）用 ADI 驱动默认值 0xFF / 0x0F。第三方子卡 D5 的极性由 SW0 在 PL 中校正，
   设备树不需要改动；SW0 位置不对时 TX 数字接口调校全部失败，`cf_axi_adc` 探测报 `-EIO`。
 

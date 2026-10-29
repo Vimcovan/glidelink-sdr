@@ -71,3 +71,27 @@ set_false_path -from [get_ports sw_tx_swap]
 # clocks (ADI fmcomms2: up to 245.76 MHz data clock)
 
 create_clock -name rx_clk -period 4.00 [get_ports rx_clk_in_p]
+
+# GlideLink shell clock-domain crossings (CPU clock, AD9361 data clock,
+# 200 MHz processing clock). Every crossing ends in an ASYNC_REG synchroniser
+# (toggle handshakes, Gray-coded FIFO pointers and counters); bounding their
+# delay keeps the Gray codes single-bit-change. The multi-bit values the
+# handshakes qualify (snapshot, counter load value) are stable while they
+# cross, and the configuration registers are quasi-static.
+
+set shell_sync [get_cells -hier -filter {NAME =~ *shell/inst/* && ASYNC_REG == TRUE}]
+set_max_delay -datapath_only 4.0 -from [get_clocks clk_pl_0] -to $shell_sync
+set_max_delay -datapath_only 4.0 -from [get_clocks clk_pl_3] -to $shell_sync
+set_max_delay -datapath_only 4.0 -from [get_clocks rx_clk] -to $shell_sync
+# slot register bridge: request (address, data, direction) and read response
+set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/i_slot0_cdc/addr_reg[*] || NAME =~ *shell/inst/i_slot0_cdc/wdata_reg[*] || NAME =~ *shell/inst/i_slot0_cdc/is_write_reg}] \
+  -to [get_clocks clk_pl_3]
+set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/i_slot0_cdc/resp_data_reg[*]}] \
+  -to [get_clocks clk_pl_0]
+set_false_path -to [get_cells -hier -filter {NAME =~ *shell/inst/i_regs/ctrl_out_m1_reg[*]}]
+set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/i_regs/snap_reg[*]}] \
+  -to [get_cells -hier -filter {NAME =~ *shell/inst/i_regs/time_cpu_reg[*]}]
+set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/i_regs/time_set_*_reg[*]}] \
+  -to [get_cells -hier -filter {NAME =~ *shell/inst/i_regs/count_reg[*]}]
+# (cfg_reg* / pkt_len_reg* include the copies Vivado makes of them for fanout, *_rep*_replica*)
+set_false_path -from [get_cells -hier -filter {NAME =~ *shell/inst/i_regs/pkt_len_reg* || NAME =~ *shell/inst/i_regs/cfg_reg*}]

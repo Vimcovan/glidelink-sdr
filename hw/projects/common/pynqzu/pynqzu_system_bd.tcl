@@ -57,11 +57,13 @@ ad_ip_parameter sys_ps8 CONFIG.PSU__CRL_APB__PL0_REF_CTRL__SRCSEL {IOPLL}
 ad_ip_parameter sys_ps8 CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ 100
 ad_ip_parameter sys_ps8 CONFIG.PSU__FPGA_PL1_ENABLE 1
 ad_ip_parameter sys_ps8 CONFIG.PSU__FPGA_PL2_ENABLE 1
-ad_ip_parameter sys_ps8 CONFIG.PSU__FPGA_PL3_ENABLE 0
+ad_ip_parameter sys_ps8 CONFIG.PSU__FPGA_PL3_ENABLE 1
 ad_ip_parameter sys_ps8 CONFIG.PSU__CRL_APB__PL1_REF_CTRL__SRCSEL {IOPLL}
 ad_ip_parameter sys_ps8 CONFIG.PSU__CRL_APB__PL1_REF_CTRL__FREQMHZ 250
 ad_ip_parameter sys_ps8 CONFIG.PSU__CRL_APB__PL2_REF_CTRL__SRCSEL {IOPLL}
 ad_ip_parameter sys_ps8 CONFIG.PSU__CRL_APB__PL2_REF_CTRL__FREQMHZ 500
+ad_ip_parameter sys_ps8 CONFIG.PSU__CRL_APB__PL3_REF_CTRL__SRCSEL {IOPLL}
+ad_ip_parameter sys_ps8 CONFIG.PSU__CRL_APB__PL3_REF_CTRL__FREQMHZ 200
 ad_ip_parameter sys_ps8 CONFIG.PSU__USE__IRQ0 1
 ad_ip_parameter sys_ps8 CONFIG.PSU__USE__IRQ1 1
 ad_ip_parameter sys_ps8 CONFIG.PSU__GPIO_EMIO__PERIPHERAL__ENABLE 1
@@ -75,12 +77,15 @@ ad_ip_instance proc_sys_reset sys_250m_rstgen
 ad_ip_parameter sys_250m_rstgen CONFIG.C_EXT_RST_WIDTH 1
 ad_ip_instance proc_sys_reset sys_500m_rstgen
 ad_ip_parameter sys_500m_rstgen CONFIG.C_EXT_RST_WIDTH 1
+ad_ip_instance proc_sys_reset sys_200m_rstgen
+ad_ip_parameter sys_200m_rstgen CONFIG.C_EXT_RST_WIDTH 1
 
 # system reset/clock definitions
 
 ad_connect  sys_cpu_clk sys_ps8/pl_clk0
 ad_connect  sys_250m_clk sys_ps8/pl_clk1
 ad_connect  sys_500m_clk sys_ps8/pl_clk2
+ad_connect  sys_200m_clk sys_ps8/pl_clk3
 
 ad_connect  sys_ps8/pl_resetn0 sys_rstgen/ext_reset_in
 ad_connect  sys_cpu_clk sys_rstgen/slowest_sync_clk
@@ -88,6 +93,8 @@ ad_connect  sys_ps8/pl_resetn0 sys_250m_rstgen/ext_reset_in
 ad_connect  sys_250m_clk sys_250m_rstgen/slowest_sync_clk
 ad_connect  sys_ps8/pl_resetn0 sys_500m_rstgen/ext_reset_in
 ad_connect  sys_500m_clk sys_500m_rstgen/slowest_sync_clk
+ad_connect  sys_ps8/pl_resetn0 sys_200m_rstgen/ext_reset_in
+ad_connect  sys_200m_clk sys_200m_rstgen/slowest_sync_clk
 
 ad_connect  sys_cpu_reset sys_rstgen/peripheral_reset
 ad_connect  sys_cpu_resetn sys_rstgen/peripheral_aresetn
@@ -95,6 +102,8 @@ ad_connect  sys_250m_reset sys_250m_rstgen/peripheral_reset
 ad_connect  sys_250m_resetn sys_250m_rstgen/peripheral_aresetn
 ad_connect  sys_500m_reset sys_500m_rstgen/peripheral_reset
 ad_connect  sys_500m_resetn sys_500m_rstgen/peripheral_aresetn
+ad_connect  sys_200m_reset sys_200m_rstgen/peripheral_reset
+ad_connect  sys_200m_resetn sys_200m_rstgen/peripheral_aresetn
 
 # generic system clocks&resets pointers
 

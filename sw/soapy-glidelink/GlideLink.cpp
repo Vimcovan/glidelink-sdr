@@ -12,6 +12,7 @@
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Registry.hpp>
+#include <SoapySDR/Time.hpp>
 #include <iio.h>
 
 #include <algorithm>
@@ -28,8 +29,12 @@ namespace {
 const char *PHY_NAME = "ad9361-phy";
 const char *RX_NAME = "cf-ad9361-lpc";
 const char *TX_NAME = "cf-ad9361-dds-core-lpc";
+const char *SHELL_NAME = "glidelink-shell";    // PL shell registers, optional
 
-const size_t DEFAULT_BUFFER_LENGTH = 16384;    // samples per IIO buffer
+const size_t DEFAULT_BUFFER_LENGTH = 65536;    // samples per IIO buffer; 4 queued = 5 ms at 50 MSPS
+// Highest sample rate: on the third-party AD9361 card the TX data interface is
+// only bit-exact up to 50 MSPS (pairs D4/D5, hw/dts/fmcomms2_pynqzu.dtso)
+const double MAX_SAMPLE_RATE = 50e6;
 const unsigned DEFAULT_TIMEOUT_MS = 1000;
 const double TX_ATTEN_MAX = 89.75;             // dB, TX gain = 89.75 + hardwaregain
 
@@ -46,7 +51,27 @@ struct Stream {
 	iio_buffer *buf = nullptr;
 	size_t pos = 0;                 // samples consumed (RX) / filled (TX) in buf
 	size_t avail = 0;               // RX: samples in buf
+
+	// packet headers on host port 0 (shell >= 1.1, docs/phase1_shell.md D4)
+	bool headers = false;
+	double rate = 0;                // sample rate when the stream was activated
+	unsigned hdrPos = 0;            // RX: header words taken of the current packet (4 = samples)
+	uint32_t hdr[4] = {0, 0, 0, 0};
+	size_t pktLeft = 0;             // RX: samples left in the current packet
+	uint64_t pktTime = 0;           // RX: sample counter of the next sample
+	bool overflow = false;          // RX: report an overflow before the next samples
+	bool firstPacket = true;        // RX: drops before the stream started are not its overflow
+	uint32_t seq = 0;               // TX: packet sequence number
 };
+
+const uint32_t HDR_MAGIC = 0xA5;
+const uint32_t FLAG_RX_DROPPED = 1u << 0, FLAG_TX_TIMED = 1u << 0, FLAG_TX_EOB = 1u << 1;
+const unsigned SHELL_VERSION_HEADERS = 0x00010100;
+// shell registers (hw/library/glidelink_shell/glidelink_shell_regs.v)
+const unsigned REG_VERSION = 0x004, REG_CONFIG = 0x054, REG_PORT_RESET = 0x05C, REG_ROUTE = 0x1000;
+const unsigned PORT_RESET_HOST0_RX = 1u << 0, PORT_RESET_HOST0_TX = 1u << 1;
+const unsigned CFG_RX_ENABLE = 1u << 0, CFG_HOST0_RX_HDR = 1u << 2, CFG_HOST0_TX_HDR = 1u << 3;
+const unsigned SINK_RF_TX = 0, SINK_HOST0_RX = 1, SRC_RF_RX = 0, SRC_HOST0_TX = 1, ROUTE_NONE = 0xF;
 
 class GlideLink : public SoapySDR::Device {
 public:
@@ -64,6 +89,7 @@ public:
 			iio_context_destroy(ctx);
 			throw std::runtime_error("GlideLink: AD9361 IIO devices not found at " + uri);
 		}
+		shell = iio_context_find_device(ctx, SHELL_NAME);
 		iio_context_set_timeout(ctx, DEFAULT_TIMEOUT_MS);
 	}
 
@@ -90,6 +116,13 @@ public:
 
 	size_t getNumChannels(const int dir) const override
 	{
+		// with the shell, only the RF channels it streams (CAPS[7:0]) reach the DMAs
+		if (shell) {
+			uint32_t caps = 0;
+			std::lock_guard<std::mutex> lock(mutex);
+			if (iio_device_reg_read(shell, 0x008, &caps) == 0)
+				return caps & 0xff;
+		}
 		iio_device *dev = dir == SOAPY_SDR_RX ? rxDev : txDev;
 		size_t n = 0;
 		while (iio_device_find_channel(dev, chanName(2 * n + 1).c_str(), dir == SOAPY_SDR_TX))
@@ -200,6 +233,9 @@ public:
 
 	void setSampleRate(const int dir, const size_t ch, const double rate) override
 	{
+		if (rate > MAX_SAMPLE_RATE)
+			throw std::runtime_error("GlideLink: sample rate above " +
+						 std::to_string(llround(MAX_SAMPLE_RATE)) + " S/s");
 		writeLongLong(phyChan(dir, ch), "sampling_frequency", llround(rate));
 	}
 
@@ -210,14 +246,15 @@ public:
 
 	SoapySDR::RangeList getSampleRateRange(const int dir, const size_t ch) const override
 	{
-		return {readRange(phyChan(dir, ch), "sampling_frequency_available")};
+		SoapySDR::Range r = readRange(phyChan(dir, ch), "sampling_frequency_available");
+		return {SoapySDR::Range(r.minimum(), std::min(r.maximum(), MAX_SAMPLE_RATE), r.step())};
 	}
 
 	std::vector<double> listSampleRates(const int dir, const size_t ch) const override
 	{
-		SoapySDR::Range r = readRange(phyChan(dir, ch), "sampling_frequency_available");
+		SoapySDR::Range r = getSampleRateRange(dir, ch).front();
 		std::vector<double> rates;
-		for (double f : {2.5e6, 5e6, 10e6, 15.36e6, 20e6, 30.72e6, 61.44e6})
+		for (double f : {2.5e6, 5e6, 10e6, 15.36e6, 20e6, 30.72e6, 40e6, 50e6})
 			if (f >= r.minimum() && f <= r.maximum())
 				rates.push_back(f);
 		return rates;
@@ -240,26 +277,56 @@ public:
 		return {readRange(phyChan(dir, ch), "rf_bandwidth_available")};
 	}
 
-	// registers
+	// registers: "AD9361" (SPI registers), "FPGA" (PL shell window, byte offsets)
 
-	std::vector<std::string> listRegisterInterfaces() const override { return {"AD9361"}; }
+	std::vector<std::string> listRegisterInterfaces() const override
+	{
+		if (shell)
+			return {"AD9361", "FPGA"};
+		return {"AD9361"};
+	}
 
 	void writeRegister(const std::string &name, const unsigned addr, const unsigned value) override
 	{
-		checkRegisterInterface(name);
+		iio_device *dev = registerDevice(name);
 		std::lock_guard<std::mutex> lock(mutex);
-		if (iio_device_reg_write(phy, addr, value) < 0)
-			throw std::runtime_error("GlideLink: AD9361 register write failed");
+		if (iio_device_reg_write(dev, addr, value) < 0)
+			throw std::runtime_error("GlideLink: " + name + " register write failed");
 	}
 
 	unsigned readRegister(const std::string &name, const unsigned addr) const override
 	{
-		checkRegisterInterface(name);
+		iio_device *dev = registerDevice(name);
 		std::lock_guard<std::mutex> lock(mutex);
 		uint32_t value = 0;
-		if (iio_device_reg_read(phy, addr, &value) < 0)
-			throw std::runtime_error("GlideLink: AD9361 register read failed");
+		if (iio_device_reg_read(dev, addr, &value) < 0)
+			throw std::runtime_error("GlideLink: " + name + " register read failed");
 		return value;
+	}
+
+	// time: the shell's sample counter (RF channel 0 samples) at the current sample rate
+
+	bool hasHardwareTime(const std::string &what) const override { return shell && what.empty(); }
+
+	long long getHardwareTime(const std::string &what) const override
+	{
+		checkTime(what);
+		long long samples;
+		{
+			std::lock_guard<std::mutex> lock(mutex);
+			if (iio_device_attr_read_longlong(shell, "timestamp", &samples) < 0)
+				throw std::runtime_error("GlideLink: cannot read the sample counter");
+		}
+		return SoapySDR::ticksToTimeNs(samples, sampleRate());
+	}
+
+	void setHardwareTime(const long long timeNs, const std::string &what) override
+	{
+		checkTime(what);
+		long long samples = SoapySDR::timeNsToTicks(timeNs, sampleRate());
+		std::lock_guard<std::mutex> lock(mutex);
+		if (iio_device_attr_write_longlong(shell, "timestamp", samples) < 0)
+			throw std::runtime_error("GlideLink: cannot set the sample counter");
 	}
 
 	// streams
@@ -283,7 +350,14 @@ public:
 		len.name = "Buffer length";
 		len.description = "Samples per IIO buffer (one DMA transfer).";
 		len.type = SoapySDR::ArgInfo::INT;
-		return {len};
+		SoapySDR::ArgInfo hdr;
+		hdr.key = "headers";
+		hdr.value = "true";
+		hdr.name = "Packet headers";
+		hdr.description = "Timestamps and burst flags through the shell's packet headers "
+				  "(shell 1.1 and later); off gives raw samples.";
+		hdr.type = SoapySDR::ArgInfo::BOOL;
+		return {len, hdr};
 	}
 
 	SoapySDR::Stream *setupStream(const int dir, const std::string &format,
@@ -300,6 +374,10 @@ public:
 		auto it = args.find("bufferLength");
 		if (it != args.end())
 			s->bufferLength = std::stoul(it->second);
+		it = args.find("headers");
+		s->headers = shell && readRegister("FPGA", REG_VERSION) >= SHELL_VERSION_HEADERS &&
+			     (it == args.end() || it->second != "false") && s->channels.size() == 1 &&
+			     s->channels[0] == 0;
 
 		size_t n = getNumChannels(dir);
 		std::vector<size_t> sorted = s->channels;
@@ -346,7 +424,20 @@ public:
 		Stream *s = reinterpret_cast<Stream *>(stream);
 		if (s->buf)
 			return 0;
+		s->rate = sampleRate();
+		s->hdrPos = 0;
+		s->pktLeft = 0;
+		s->overflow = false;
+		s->firstPacket = true;
+		// RX: hold the RX streamer off until the DMA has its buffers queued, so
+		// the stream neither starts with a drop nor with samples from before it
+		bool gateRx = s->headers && s->direction == SOAPY_SDR_RX;
+		if (gateRx)
+			setRxEnable(false);
+		setPortHeaders(s, s->headers);
 		s->buf = iio_device_create_buffer(s->dev, s->bufferLength, false);
+		if (gateRx)
+			setRxEnable(true);
 		if (!s->buf) {
 			SoapySDR::logf(SOAPY_SDR_ERROR, "GlideLink: cannot create IIO buffer (%s)", strerror(errno));
 			return SOAPY_SDR_STREAM_ERROR;
@@ -359,7 +450,10 @@ public:
 	{
 		if (flags != 0)
 			return SOAPY_SDR_NOT_SUPPORTED;
-		stopBuffer(reinterpret_cast<Stream *>(stream));
+		Stream *s = reinterpret_cast<Stream *>(stream);
+		stopBuffer(s);
+		if (s->headers)
+			setPortHeaders(s, false);     // raw again for tools that do not know the headers
 		return 0;
 	}
 
@@ -371,12 +465,12 @@ public:
 		timeNs = 0;
 		if (!s->buf)
 			return SOAPY_SDR_STREAM_ERROR;
+		if (s->headers)
+			return readPackets(s, buffs[0], numElems, flags, timeNs);
 		if (s->pos == s->avail) {
-			ssize_t ret = iio_buffer_refill(s->buf);
+			int ret = refill(s);
 			if (ret < 0)
-				return ret == -ETIMEDOUT ? SOAPY_SDR_TIMEOUT : SOAPY_SDR_STREAM_ERROR;
-			s->avail = ret / iio_buffer_step(s->buf);
-			s->pos = 0;
+				return ret;
 		}
 		size_t n = std::min(numElems, s->avail - s->pos);
 		const int16_t *src = static_cast<const int16_t *>(iio_buffer_start(s->buf)) + 2 * s->numSlots * s->pos;
@@ -403,11 +497,13 @@ public:
 	}
 
 	int writeStream(SoapySDR::Stream *stream, const void *const *buffs, const size_t numElems, int &flags,
-			const long long, const long) override
+			const long long timeNs, const long) override
 	{
 		Stream *s = reinterpret_cast<Stream *>(stream);
 		if (!s->buf)
 			return SOAPY_SDR_STREAM_ERROR;
+		if (s->headers)
+			return writePacket(s, buffs[0], numElems, flags, timeNs);
 		size_t n = std::min(numElems, s->bufferLength - s->pos);
 		int16_t *dst = static_cast<int16_t *>(iio_buffer_start(s->buf)) + 2 * s->numSlots * s->pos;
 		for (size_t i = 0; i < s->channels.size(); i++) {
@@ -445,6 +541,159 @@ private:
 		return static_cast<int16_t>(std::max(-2048L, std::min(2047L, v)) * 16);
 	}
 
+	int refill(Stream *s)
+	{
+		ssize_t ret = iio_buffer_refill(s->buf);
+		if (ret < 0)
+			return ret == -ETIMEDOUT ? SOAPY_SDR_TIMEOUT : SOAPY_SDR_STREAM_ERROR;
+		s->avail = ret / iio_buffer_step(s->buf);
+		s->pos = 0;
+		return 0;
+	}
+
+	// header mode: one channel, so one buffer word per sample or header word
+
+	int readPackets(Stream *s, void *out, const size_t numElems, int &flags, long long &timeNs)
+	{
+		if (numElems == 0)
+			return 0;
+		for (;;) {
+			if (s->hdrPos == 4 && s->overflow) {
+				s->overflow = false;
+				return SOAPY_SDR_OVERFLOW;        // the samples follow on the next call
+			}
+			if (s->pos == s->avail) {
+				int ret = refill(s);
+				if (ret < 0)
+					return ret;
+			}
+			const uint32_t *w = static_cast<const uint32_t *>(iio_buffer_start(s->buf));
+			while (s->hdrPos < 4 && s->pos < s->avail) {
+				s->hdr[s->hdrPos++] = w[s->pos++];
+				if (s->hdrPos == 1 && (s->hdr[0] >> 24 != HDR_MAGIC || (s->hdr[0] & 0xffff) == 0)) {
+					SoapySDR::log(SOAPY_SDR_WARNING, "GlideLink: RX packet header lost, resynchronising");
+					s->hdrPos = 0;
+				}
+				if (s->hdrPos == 4) {
+					s->pktLeft = s->hdr[0] & 0xffff;
+					s->pktTime = (uint64_t(s->hdr[3]) << 32) | s->hdr[2];
+					if (((s->hdr[0] >> 16) & FLAG_RX_DROPPED) && !s->firstPacket)
+						s->overflow = true;
+					s->firstPacket = false;
+				}
+			}
+			if (s->hdrPos < 4 || s->overflow)
+				continue;
+			size_t n = std::min(std::min(numElems, s->pktLeft), s->avail - s->pos);
+			if (n == 0)
+				continue;
+			copyFromBuffer(s, out, w + s->pos, n);
+			flags |= SOAPY_SDR_HAS_TIME;
+			timeNs = SoapySDR::ticksToTimeNs(s->pktTime, s->rate);
+			s->pktTime += n;
+			s->pktLeft -= n;
+			s->pos += n;
+			if (s->pktLeft == 0)
+				s->hdrPos = 0;
+			else
+				flags |= SOAPY_SDR_MORE_FRAGMENTS;
+			return n;
+		}
+	}
+
+	int writePacket(Stream *s, const void *in, const size_t numElems, const int flags, const long long timeNs)
+	{
+		if (s->bufferLength - s->pos < 5) {           // no room for a header and a sample
+			int ret = pushBuffer(s);
+			if (ret < 0)
+				return ret;
+		}
+		size_t n = std::min(std::min(numElems, s->bufferLength - s->pos - 4), size_t(0xffff));
+		bool eob = (flags & SOAPY_SDR_END_BURST) && n == numElems;
+		uint32_t pf = ((flags & SOAPY_SDR_HAS_TIME) ? FLAG_TX_TIMED : 0) | (eob ? FLAG_TX_EOB : 0);
+		uint64_t t = (flags & SOAPY_SDR_HAS_TIME) ? SoapySDR::timeNsToTicks(timeNs, s->rate) : 0;
+		uint32_t *w = static_cast<uint32_t *>(iio_buffer_start(s->buf)) + s->pos;
+		w[0] = (HDR_MAGIC << 24) | (pf << 16) | uint32_t(n);
+		w[1] = s->seq++;
+		w[2] = uint32_t(t);
+		w[3] = uint32_t(t >> 32);
+		copyToBuffer(s, w + 4, in, n);
+		s->pos += 4 + n;
+		if (eob || s->bufferLength - s->pos < 5) {
+			int ret = pushBuffer(s);
+			if (ret < 0)
+				return ret;
+		}
+		return n;
+	}
+
+	int pushBuffer(Stream *s)
+	{
+		if (s->pos == 0)
+			return 0;
+		ssize_t ret = s->pos == s->bufferLength ? iio_buffer_push(s->buf)
+							: iio_buffer_push_partial(s->buf, s->pos);
+		s->pos = 0;
+		if (ret < 0)
+			return ret == -ETIMEDOUT ? SOAPY_SDR_TIMEOUT : SOAPY_SDR_STREAM_ERROR;
+		return 0;
+	}
+
+	void copyFromBuffer(const Stream *s, void *out, const uint32_t *w, size_t n) const
+	{
+		const int16_t *p = reinterpret_cast<const int16_t *>(w);
+		if (s->cf32) {
+			float *dst = static_cast<float *>(out);
+			for (size_t j = 0; j < 2 * n; j++)
+				dst[j] = p[j] / 2048.0f;
+		} else {
+			std::memcpy(out, p, 4 * n);
+		}
+	}
+
+	void copyToBuffer(const Stream *s, uint32_t *w, const void *in, size_t n) const
+	{
+		int16_t *p = reinterpret_cast<int16_t *>(w);
+		if (s->cf32) {
+			const float *src = static_cast<const float *>(in);
+			for (size_t j = 0; j < 2 * n; j++)
+				p[j] = toDac(std::lround(src[j] * 2048.0f));
+		} else {
+			const int16_t *src = static_cast<const int16_t *>(in);
+			for (size_t j = 0; j < 2 * n; j++)
+				p[j] = toDac(src[j]);
+		}
+	}
+
+	void setRxEnable(bool on)
+	{
+		unsigned cfg = readRegister("FPGA", REG_CONFIG);
+		writeRegister("FPGA", REG_CONFIG, on ? (cfg | CFG_RX_ENABLE) : (cfg & ~CFG_RX_ENABLE));
+	}
+
+	// Host port 0 is flushed and its header mode set while the port is idle:
+	// a stream that was torn down can leave a packet cut off in the shell
+	// (the DMA stops mid-transfer), which PORT_RESET clears; RX is unrouted
+	// meanwhile, and the switch reconnects it at the start of a packet.
+	void setPortHeaders(const Stream *s, bool on)
+	{
+		if (!shell || readRegister("FPGA", REG_VERSION) < SHELL_VERSION_HEADERS)
+			return;
+		unsigned bit = s->direction == SOAPY_SDR_RX ? CFG_HOST0_RX_HDR : CFG_HOST0_TX_HDR;
+		unsigned cfg = readRegister("FPGA", REG_CONFIG);
+		cfg = on ? (cfg | bit) : (cfg & ~bit);
+		if (s->direction == SOAPY_SDR_RX) {
+			writeRegister("FPGA", REG_ROUTE + 4 * SINK_HOST0_RX, ROUTE_NONE);
+			writeRegister("FPGA", REG_PORT_RESET, PORT_RESET_HOST0_RX);
+			writeRegister("FPGA", REG_CONFIG, cfg);
+			writeRegister("FPGA", REG_ROUTE + 4 * SINK_HOST0_RX, SRC_RF_RX);
+		} else {
+			writeRegister("FPGA", REG_PORT_RESET, PORT_RESET_HOST0_TX);
+			writeRegister("FPGA", REG_CONFIG, cfg);
+			writeRegister("FPGA", REG_ROUTE + 4 * SINK_RF_TX, SRC_HOST0_TX);
+		}
+	}
+
 	void stopBuffer(Stream *s)
 	{
 		if (!s->buf)
@@ -469,11 +718,22 @@ private:
 		return iio_device_find_channel(phy, dir == SOAPY_SDR_RX ? "altvoltage0" : "altvoltage1", true);
 	}
 
-	static void checkRegisterInterface(const std::string &name)
+	iio_device *registerDevice(const std::string &name) const
 	{
-		if (name != "AD9361")
-			throw std::runtime_error("GlideLink: unknown register interface " + name);
+		if (name == "AD9361")
+			return phy;
+		if (name == "FPGA" && shell)
+			return shell;
+		throw std::runtime_error("GlideLink: unknown register interface " + name);
 	}
+
+	void checkTime(const std::string &what) const
+	{
+		if (!shell || !what.empty())
+			throw std::runtime_error("GlideLink: no hardware time \"" + what + "\"");
+	}
+
+	double sampleRate() const { return readDouble(phyChan(SOAPY_SDR_RX, 0), "sampling_frequency"); }
 
 	std::string readAttr(iio_channel *chn, const char *attr) const
 	{
@@ -523,7 +783,7 @@ private:
 
 	std::string uri;
 	iio_context *ctx = nullptr;
-	iio_device *phy = nullptr, *rxDev = nullptr, *txDev = nullptr;
+	iio_device *phy = nullptr, *rxDev = nullptr, *txDev = nullptr, *shell = nullptr;
 	mutable std::mutex mutex;
 };
 
