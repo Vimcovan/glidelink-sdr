@@ -1,0 +1,2 @@
+*.sh text eol=lf
+os/kernel/config-* text eol=lf
