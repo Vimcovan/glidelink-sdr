@@ -1,8 +1,8 @@
 // ***************************************************************************
 // GlideLink shell, steps 1.3 / 1.4 (docs/phase1_shell.md)
 //
-//   sources: 0 RF RX (RX streamer), 1 host port 0 TX (host TX adapter), 2 slot 0 out
-//   sinks:   0 RF TX (TX streamer), 1 host port 0 RX (host RX adapter), 2 slot 0 in
+//   sources: 0 RF RX (RX streamer), 1 host port 0 TX, 2 slot 0 out, 3 host port 1 TX
+//   sinks:   0 RF TX (TX streamer), 1 host port 0 RX, 2 slot 0 in, 3 host port 1 RX
 //
 // The stream switch connects them (routes from the registers; reset routes
 // RF RX -> host 0 RX and host 0 TX -> RF TX). Host port 0 carries 16-byte
@@ -77,23 +77,35 @@ module glidelink_shell (
   input             host0_tx_valid,
   output            host0_tx_ready,
   input     [31:0]  host0_tx_data,
-  input             host0_tx_last
+  input             host0_tx_last,
+
+  // host port 1 (processing clock): as host port 0, not tied to the RF
+  output            host1_rx_valid,         // fifo_wr_en
+  input             host1_rx_xfer_req,
+  input             host1_rx_overflow,
+  output    [31:0]  host1_rx_data,
+  input             host1_tx_valid,
+  output            host1_tx_ready,
+  input     [31:0]  host1_tx_data,
+  input             host1_tx_last
 );
 
-  localparam N_SRC = 3, N_SNK = 3;
+  localparam N_SRC = 4, N_SNK = 4;
 
   wire        rst = !rstn;
   wire [63:0] time_now;
   wire [15:0] rx_pkt_len;
-  wire        rx_enable, tx_late_drop, host0_rx_hdr, host0_tx_hdr;
-  wire [31:0] ovf_gray, unf_gray, late_gray, herr_gray;
-  reg  [31:0] dma_ovf = 32'd0, dma_ovf_gray = 32'd0;
+  wire        rx_enable, tx_late_drop, host0_rx_hdr, host0_tx_hdr, host1_rx_hdr, host1_tx_hdr;
+  wire [31:0] ovf_gray, unf_gray, late_gray, herr_gray, herr1_gray;
+  reg  [31:0] dma_ovf = 32'd0, dma_ovf_gray = 32'd0, dma1_ovf = 32'd0, dma1_ovf_gray = 32'd0;
   wire [N_SNK*4-1:0] route;
-  wire  [2:0] port_reset;                 // CPU clock: bit 0 host 0 RX, bit 1 host 0 TX, bit 2 slot 0
-  (* ASYNC_REG = "TRUE" *) reg [2:0] prst_m1 = 3'd0, prst_s = 3'd0;
+  wire  [4:0] port_reset;                 // CPU clock: host 0 RX, host 0 TX, slot 0, host 1 RX, host 1 TX
+  (* ASYNC_REG = "TRUE" *) reg [4:0] prst_m1 = 5'd0, prst_s = 5'd0;
   wire        rx_flush = prst_s[0];
   wire        tx_flush = prst_s[1];
   wire        slot_flush = prst_s[2];
+  wire        rx1_flush = prst_s[3];
+  wire        tx1_flush = prst_s[4];
   always @(posedge clk) begin
     prst_m1 <= port_reset;
     prst_s <= prst_m1;
@@ -122,7 +134,7 @@ module glidelink_shell (
     .m_araddr(r_araddr), .m_arvalid(r_arvalid), .m_arready(r_arready),
     .m_rvalid(r_rvalid), .m_rready(r_rready), .m_rdata(r_rdata));
 
-  glidelink_shell_regs #(.SLOTS(8'd1), .N_SNK(N_SNK)) i_regs (
+  glidelink_shell_regs #(.HOST_RX(8'd2), .HOST_TX(8'd2), .SLOTS(8'd1), .N_SNK(N_SNK)) i_regs (
     .s_axi_aclk(s_axi_aclk), .s_axi_aresetn(s_axi_aresetn),
     .s_axi_awvalid(r_awvalid[0]), .s_axi_awready(r_awready[0]), .s_axi_awaddr(r_awaddr),
     .s_axi_awprot(3'd0), .s_axi_wvalid(r_wvalid[0]), .s_axi_wready(r_wready[0]),
@@ -134,8 +146,10 @@ module glidelink_shell (
     .l_clk(l_clk), .adc_valid(adc_valid_i0), .time_now(time_now),
     .ctrl_out(ctrl_out), .rx_overflow_gray(ovf_gray), .tx_underflow_gray(unf_gray),
     .tx_late_gray(late_gray), .host0_tx_err_gray(herr_gray), .host0_rx_ovf_gray(dma_ovf_gray),
+    .host1_tx_err_gray(herr1_gray), .host1_rx_ovf_gray(dma1_ovf_gray),
     .rx_pkt_len(rx_pkt_len), .rx_enable(rx_enable), .tx_late_drop(tx_late_drop),
-    .host0_rx_hdr(host0_rx_hdr), .host0_tx_hdr(host0_tx_hdr), .route(route),
+    .host0_rx_hdr(host0_rx_hdr), .host0_tx_hdr(host0_tx_hdr), .host1_rx_hdr(host1_rx_hdr),
+    .host1_tx_hdr(host1_tx_hdr), .route(route),
     .port_reset(port_reset));
 
   wire        sl_awvalid, sl_awready, sl_wvalid, sl_wready, sl_bvalid, sl_bready;
@@ -194,7 +208,7 @@ module glidelink_shell (
 
   glidelink_switch #(.N_SRC(N_SRC), .N_SNK(N_SNK)) i_switch (
     .clk(clk), .rst(rst), .route(route),
-    .abort_snk({slot_flush, rx_flush, tx_flush}), .abort_src({slot_flush, tx_flush, 1'b0}),
+    .abort_snk({rx1_flush, slot_flush, rx_flush, tx_flush}), .abort_src({tx1_flush, slot_flush, tx_flush, 1'b0}),
     .s_valid(src_valid), .s_ready(src_ready), .s_data(src_data), .s_user(src_user), .s_last(src_last),
     .m_valid(snk_valid), .m_ready(snk_ready), .m_data(snk_data), .m_user(snk_user), .m_last(snk_last));
 
@@ -222,5 +236,29 @@ module glidelink_shell (
     .s_valid(snk_valid[1]), .s_ready(snk_ready[1]), .s_data(snk_data[32 +: 32]),
     .s_user(snk_user[72 +: 72]), .s_last(snk_last[1]),
     .m_valid(rx_valid), .m_ready(rx_take), .m_data(host0_rx_data));
+
+  // host port 1: TX adapter (source 3), RX adapter (sink 3)
+
+  glidelink_host_tx i_host1_tx (
+    .clk(clk), .rst(rst || tx1_flush), .hdr_en(host1_tx_hdr),
+    .s_valid(host1_tx_valid), .s_ready(host1_tx_ready), .s_data(host1_tx_data), .s_last(host1_tx_last),
+    .m_valid(src_valid[3]), .m_ready(src_ready[3]), .m_data(src_data[96 +: 32]),
+    .m_user(src_user[216 +: 72]), .m_last(src_last[3]), .errors_gray(herr1_gray));
+
+  wire        rx1_valid;
+  wire        rx1_take = host1_rx_xfer_req && rx_phase;
+
+  always @(posedge clk) begin
+    if (host1_rx_overflow) dma1_ovf <= dma1_ovf + 32'd1;
+    dma1_ovf_gray <= dma1_ovf ^ (dma1_ovf >> 1);
+  end
+
+  assign host1_rx_valid = rx1_valid && rx1_take;
+
+  glidelink_host_rx i_host1_rx (
+    .clk(clk), .rst(rst || rx1_flush), .hdr_en(host1_rx_hdr),
+    .s_valid(snk_valid[3]), .s_ready(snk_ready[3]), .s_data(snk_data[96 +: 32]),
+    .s_user(snk_user[216 +: 72]), .s_last(snk_last[3]),
+    .m_valid(rx1_valid), .m_ready(rx1_take), .m_data(host1_rx_data));
 
 endmodule

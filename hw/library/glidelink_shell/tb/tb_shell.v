@@ -50,7 +50,9 @@ module tb_shell;
     .ctrl_out(8'd0), .clk(clk), .rstn(rstn),
     .host0_rx_valid(rx_valid), .host0_rx_xfer_req(rx_ready), .host0_rx_overflow(1'b0), .host0_rx_data(rx_data),
     .host0_tx_valid(tx_valid), .host0_tx_ready(tx_ready), .host0_tx_data(tx_data),
-    .host0_tx_last(tx_last));
+    .host0_tx_last(tx_last),
+    .host1_rx_valid(), .host1_rx_xfer_req(1'b0), .host1_rx_overflow(1'b0), .host1_rx_data(),
+    .host1_tx_valid(1'b0), .host1_tx_ready(), .host1_tx_data(32'd0), .host1_tx_last(1'b0));
 
   task axi_read(input [15:0] a, output [31:0] d);
     begin

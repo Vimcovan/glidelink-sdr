@@ -138,12 +138,58 @@ ad_connect axi_ad9361_dac_dma/m_axis_last shell/host0_tx_last
 ad_connect $sys_cpu_resetn axi_ad9361_dac_dma/m_src_axi_aresetn
 ad_connect $sys_cpu_resetn axi_ad9361_dac_dma/m_sg_axi_aresetn
 
-# cpu interconnect, memory, interrupts (as ADI fmcomms2)
+# host port 1 (step 1.5): a second DMA pair, like host port 0 but not tied to
+# the RF; IIO devices glidelink-host1-rx / -tx (os/kernel/glidelink)
+
+ad_ip_instance axi_dmac host1_rx_dma
+ad_ip_parameter host1_rx_dma CONFIG.DMA_TYPE_SRC 2
+ad_ip_parameter host1_rx_dma CONFIG.DMA_TYPE_DEST 0
+ad_ip_parameter host1_rx_dma CONFIG.CYCLIC 0
+ad_ip_parameter host1_rx_dma CONFIG.SYNC_TRANSFER_START 0
+ad_ip_parameter host1_rx_dma CONFIG.AXI_SLICE_SRC 0
+ad_ip_parameter host1_rx_dma CONFIG.AXI_SLICE_DEST 0
+ad_ip_parameter host1_rx_dma CONFIG.DMA_2D_TRANSFER 0
+ad_ip_parameter host1_rx_dma CONFIG.DMA_SG_TRANSFER 1
+ad_ip_parameter host1_rx_dma CONFIG.DMA_DATA_WIDTH_SRC 32
+ad_ip_parameter host1_rx_dma CONFIG.DMA_DATA_WIDTH_SG 64
+ad_ip_parameter host1_rx_dma CONFIG.CACHE_COHERENT $CACHE_COHERENCY
+
+ad_connect sys_200m_clk host1_rx_dma/fifo_wr_clk
+ad_connect shell/host1_rx_valid host1_rx_dma/fifo_wr_en
+ad_connect shell/host1_rx_data host1_rx_dma/fifo_wr_din
+ad_connect host1_rx_dma/fifo_wr_xfer_req shell/host1_rx_xfer_req
+ad_connect host1_rx_dma/fifo_wr_overflow shell/host1_rx_overflow
+ad_connect $sys_cpu_resetn host1_rx_dma/m_dest_axi_aresetn
+ad_connect $sys_cpu_resetn host1_rx_dma/m_sg_axi_aresetn
+
+ad_ip_instance axi_dmac host1_tx_dma
+ad_ip_parameter host1_tx_dma CONFIG.DMA_TYPE_SRC 0
+ad_ip_parameter host1_tx_dma CONFIG.DMA_TYPE_DEST 1
+ad_ip_parameter host1_tx_dma CONFIG.CYCLIC 1
+ad_ip_parameter host1_tx_dma CONFIG.AXI_SLICE_SRC 0
+ad_ip_parameter host1_tx_dma CONFIG.AXI_SLICE_DEST 0
+ad_ip_parameter host1_tx_dma CONFIG.DMA_2D_TRANSFER 0
+ad_ip_parameter host1_tx_dma CONFIG.DMA_SG_TRANSFER 1
+ad_ip_parameter host1_tx_dma CONFIG.DMA_DATA_WIDTH_DEST 32
+ad_ip_parameter host1_tx_dma CONFIG.DMA_DATA_WIDTH_SG 64
+ad_ip_parameter host1_tx_dma CONFIG.CACHE_COHERENT $CACHE_COHERENCY
+
+ad_connect sys_200m_clk host1_tx_dma/m_axis_aclk
+ad_connect host1_tx_dma/m_axis_valid shell/host1_tx_valid
+ad_connect host1_tx_dma/m_axis_ready shell/host1_tx_ready
+ad_connect host1_tx_dma/m_axis_data shell/host1_tx_data
+ad_connect host1_tx_dma/m_axis_last shell/host1_tx_last
+ad_connect $sys_cpu_resetn host1_tx_dma/m_src_axi_aresetn
+ad_connect $sys_cpu_resetn host1_tx_dma/m_sg_axi_aresetn
+
+# cpu interconnect, memory, interrupts (as ADI fmcomms2, plus host port 1)
 
 ad_cpu_interconnect 0x79020000 axi_ad9361
 ad_cpu_interconnect 0x7C400000 axi_ad9361_adc_dma
 ad_cpu_interconnect 0x7C420000 axi_ad9361_dac_dma
 ad_cpu_interconnect 0x44B00000 shell
+ad_cpu_interconnect 0x7C440000 host1_rx_dma
+ad_cpu_interconnect 0x7C460000 host1_tx_dma
 
 ad_mem_hpc0_interconnect $sys_cpu_clk sys_ps8/S_AXI_HPC0
 ad_mem_hpc0_interconnect $sys_cpu_clk axi_ad9361_adc_dma/m_dest_axi
@@ -151,6 +197,12 @@ ad_mem_hpc0_interconnect $sys_cpu_clk axi_ad9361_adc_dma/m_sg_axi
 ad_mem_hpc1_interconnect $sys_cpu_clk sys_ps8/S_AXI_HPC1
 ad_mem_hpc1_interconnect $sys_cpu_clk axi_ad9361_dac_dma/m_src_axi
 ad_mem_hpc1_interconnect $sys_cpu_clk axi_ad9361_dac_dma/m_sg_axi
+ad_mem_hpc0_interconnect $sys_cpu_clk host1_rx_dma/m_dest_axi
+ad_mem_hpc0_interconnect $sys_cpu_clk host1_rx_dma/m_sg_axi
+ad_mem_hpc1_interconnect $sys_cpu_clk host1_tx_dma/m_src_axi
+ad_mem_hpc1_interconnect $sys_cpu_clk host1_tx_dma/m_sg_axi
 
 ad_cpu_interrupt ps-13 mb-12 axi_ad9361_adc_dma/irq
 ad_cpu_interrupt ps-12 mb-13 axi_ad9361_dac_dma/irq
+ad_cpu_interrupt ps-10 mb-10 host1_rx_dma/irq
+ad_cpu_interrupt ps-9 mb-9 host1_tx_dma/irq

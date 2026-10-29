@@ -26,7 +26,7 @@ module tb_shell_regs;
   wire [1:0]  bresp, rresp;
   wire [63:0] time_now;
 
-  glidelink_shell_regs #(.SLOTS(8'd1)) dut (
+  glidelink_shell_regs #(.HOST_RX(8'd2), .HOST_TX(8'd2), .SLOTS(8'd1)) dut (
     .s_axi_aclk(aclk), .s_axi_aresetn(aresetn),
     .s_axi_awvalid(awvalid), .s_axi_awready(awready), .s_axi_awaddr(awaddr), .s_axi_awprot(3'd0),
     .s_axi_wvalid(wvalid), .s_axi_wready(wready), .s_axi_wdata(wdata), .s_axi_wstrb(4'hf),
@@ -90,8 +90,8 @@ module tb_shell_regs;
     repeat (10) @(posedge aclk);
 
     expect(16'h000, 32'h474C4B53);
-    expect(16'h004, 32'h00010100);
-    expect(16'h008, 32'h01010101);
+    expect(16'h004, 32'h00010200);
+    expect(16'h008, 32'h01020201);
     axi_write(16'h00C, 32'hDEADBEEF);
     expect(16'h00C, 32'hDEADBEEF);
     expect(16'h030, 32'h0000005A);

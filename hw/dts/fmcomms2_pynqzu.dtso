@@ -73,6 +73,31 @@
 			reg = <0x84b00000 0x10000>;
 		};
 
+		/* host port 1 (shell 1.2): DMA pair and the IIO devices on it */
+		host1_rx_dma: dma-controller@9c440000 {
+			compatible = "adi,axi-dmac-1.00.a";
+			reg = <0x9c440000 0x10000>;
+			#dma-cells = <1>;
+			#clock-cells = <0>;
+			interrupts = <0 106 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&zynqmp_clk 71>;
+		};
+
+		host1_tx_dma: dma-controller@9c460000 {
+			compatible = "adi,axi-dmac-1.00.a";
+			reg = <0x9c460000 0x10000>;
+			#dma-cells = <1>;
+			#clock-cells = <0>;
+			interrupts = <0 105 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&zynqmp_clk 71>;
+		};
+
+		glidelink-host1 {
+			compatible = "glidelink,host-port-1.0";
+			dmas = <&host1_rx_dma 0>, <&host1_tx_dma 0>;
+			dma-names = "rx", "tx";
+		};
+
 		axi_sysid_0: axi-sysid-0@85000000 {
 			compatible = "adi,axi-sysid-1.00.a";
 			reg = <0x85000000 0x10000>;
