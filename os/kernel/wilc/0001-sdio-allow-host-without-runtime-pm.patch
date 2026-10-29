@@ -1,0 +1,17 @@
+sdio: accept a host controller without runtime PM
+
+ADI adi-6.6.0 sdhci-of-arasan does not enable runtime PM, so
+pm_runtime_get_sync() returns -EACCES and probe fails with -EIO.
+
+--- a/sdio.c	2026-10-29 19:00:53.841216800 +0900
++++ b/sdio.c	2026-10-29 19:00:53.886333700 +0900
+@@ -905,7 +905,8 @@
+ 	if (!sdio_priv->is_mmc_spi) {
+ 		/* Patch for sdio interrupt latency issue */
+ 		ret = pm_runtime_get_sync(mmc_dev(func->card->host));
+-		if (ret < 0) {
++		/* -EACCES: runtime PM disabled on the host, which stays powered */
++		if (ret < 0 && ret != -EACCES) {
+ 			pm_runtime_put_noidle(mmc_dev(func->card->host));
+ 			return ret;
+ 		}
