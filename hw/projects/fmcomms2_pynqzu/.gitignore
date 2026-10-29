@@ -1,0 +1,10 @@
+# Vivado / ADI build outputs
+/fmcomms2_pynqzu.*
+/.Xil/
+/*.log
+/*.jou
+/build.stdout
+/build.exit
+/dfx_runtime.txt
+/mem_init_sys.txt
+/system_top.xsa

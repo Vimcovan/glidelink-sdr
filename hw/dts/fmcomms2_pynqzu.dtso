@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * AD9361 FMC card on PYNQ-ZU: device tree overlay for the fmcomms2_pynqzu
+ * bitstream (hw/projects/fmcomms2_pynqzu).
+ *
+ * Adapted from ADI linux arch/arm64/boot/dts/xilinx/
+ * zynqmp-zcu102-rev10-ad9361-fmcomms2-3.dts; the AD9361 settings come from
+ * ADI's adi-fmcomms2.dtsi unchanged (the third-party card has the same 40 MHz
+ * crystal and RF port wiring as AD-FMCOMMS2/3).
+ *
+ * Differences from zcu102:
+ * - the FMC SPI is an AXI Quad SPI in the PL (axi_spi);
+ * - the bus is "simple-pm-bus": nodes added by an overlay under a plain
+ *   "simple-bus" get no devices in 6.6 (the driver assumes the boot-time
+ *   population already did it); build_dtbo.sh makes ADI's /clocks node (the
+ *   40 MHz fixed-clock ad9361_clkin) one as well;
+ * - no dma-coherent: PYNQ's boot configuration does not set up HPC port
+ *   coherency, so the kernel does the cache maintenance.
+ *
+ * Build: see hw/dts/build_dtbo.sh
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/interrupt-controller/irq.h>
+
+&{/} {
+	fpga_axi: fpga-axi@0 {
+		interrupt-parent = <&gic>;
+		compatible = "simple-pm-bus";
+		#address-cells = <0x1>;
+		#size-cells = <0x1>;
+		ranges = <0 0 0 0xffffffff>;
+
+		rx_dma: dma-controller@9c400000 {
+			compatible = "adi,axi-dmac-1.00.a";
+			reg = <0x9c400000 0x10000>;
+			#dma-cells = <1>;
+			#clock-cells = <0>;
+			interrupts = <0 109 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&zynqmp_clk 71>;
+		};
+
+		tx_dma: dma-controller@9c420000 {
+			compatible = "adi,axi-dmac-1.00.a";
+			reg = <0x9c420000 0x10000>;
+			#dma-cells = <1>;
+			#clock-cells = <0>;
+			interrupts = <0 108 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&zynqmp_clk 71>;
+		};
+
+		cf_ad9361_adc_core_0: cf-ad9361-lpc@99020000 {
+			compatible = "adi,axi-ad9361-6.00.a";
+			reg = <0x99020000 0x6000>;
+			dmas = <&rx_dma 0>;
+			dma-names = "rx";
+			spibus-connected = <&adc0_ad9361>;
+		};
+
+		cf_ad9361_dac_core_0: cf-ad9361-dds-core-lpc@99024000 {
+			compatible = "adi,axi-ad9361-dds-6.00.a";
+			reg = <0x99024000 0x1000>;
+			clocks = <&adc0_ad9361 13>;
+			clock-names = "sampl_clk";
+			dmas = <&tx_dma 0>;
+			dma-names = "tx";
+		};
+
+		axi_sysid_0: axi-sysid-0@85000000 {
+			compatible = "adi,axi-sysid-1.00.a";
+			reg = <0x85000000 0x10000>;
+		};
+
+		axi_spi: spi@84a70000 {
+			compatible = "xlnx,xps-spi-2.00.a";
+			reg = <0x84a70000 0x10000>;
+			interrupts = <0 107 IRQ_TYPE_LEVEL_HIGH>;
+			num-cs = <1>;
+			bits-per-word = <8>;
+			fifo-size = <16>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+	};
+};
+
+#define fmc_spi axi_spi
+
+#include "adi-fmcomms2.dtsi"
+
+/* EMIO GPIO n = gpio 78 + n (system_top.v) */
+&adc0_ad9361 {
+	en_agc-gpios = <&gpio 122 0>;
+	sync-gpios = <&gpio 123 0>;
+	reset-gpios = <&gpio 124 0>;
+	enable-gpios = <&gpio 125 0>;
+	txnrx-gpios = <&gpio 126 0>;
+};

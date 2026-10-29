@@ -76,7 +76,7 @@
 - TX 数据在进入 LVDS 输出前与线对掩码异或，掩码由 SW0 选通（竞赛工程 `ad9361_lvds_mode.v` 中 `TX_SWAP_PAIRS` 的做法），
   以兼容第三方卡与 FMCOMMS3。
 - AD9361 的 `CTRL_OUT[7:0]`（AGC 锁定与增益索引等状态）接入外壳寄存器，供看门狗与监视程序不经 SPI 读取。
-- AD9361 的 SPI、ENSM 控制引脚由 Linux 驱动管理（SPI 走 PS 的 SPI 控制器，以设备树描述）。
+- AD9361 的 SPI、ENSM 控制引脚由 Linux 驱动管理（SPI 用 PL 中的 AXI Quad SPI，以设备树描述；PS 的两路 SPI 在 PYNQ-ZU 的启动配置下都不可用，见 `hw/README.md`）。
 
 ### 4.2 采样流化
 
@@ -190,7 +190,8 @@
 
 - 从与 PYNQ 内核版本匹配的 ADI Linux 源码中，以外部模块方式编译 ad9361、cf_axi_adc、cf_axi_dds 等驱动
   （竞赛工程为 Mali-400 补编 lima 驱动时用过同样的方法）。
-- 设备树以叠加方式在加载比特流时加入（PYNQ 支持设备树叠加），描述 SPI 上的 AD9361、`axi_ad9361`、`axi_dmac` 与参考时钟。
+- 设备树以叠加方式在加载比特流后写入 configfs（`hw/scripts/load_overlay.sh`），描述 SPI 上的 AD9361、`axi_ad9361`、
+  `axi_dmac` 与参考时钟。
 - AD9361 的初始配置（快速 AGC 参数、锁定电平 −14 dBFS 等）写进设备树，沿用竞赛工程中验证过的取值。
 
 ### 7.2 Soapy 模块 SoapyGlideLink
