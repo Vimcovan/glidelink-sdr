@@ -94,13 +94,26 @@ def run_rx(a):
     cfo = np.angle(np.sum(c[1:] * np.conj(c[:-1]))) / (2 * np.pi * L) * a.rate
     t = np.arange(aligned.size).reshape(aligned.shape)
     derot = aligned * np.exp(-2j * np.pi * cfo / a.rate * t)
-    # least-squares gain per period, residual = noise + distortion
-    g = (derot @ np.conj(x)) / np.vdot(x, x)
-    resid = derot - g[:, None] * x[None, :]
-    snr = 10 * np.log10(np.sum(np.abs(g[:, None] * x) ** 2) / np.sum(np.abs(resid) ** 2))
+    # Each period is a circular convolution of x with the channel (fractional delay, multipath,
+    # filters): estimate one response H over the occupied bins for all periods plus a complex
+    # gain per period (sample-clock drift), and count the rest of the occupied band as noise.
+    Xf = np.fft.fft(x)
+    occ = np.abs(Xf) > 1e-3 * np.abs(Xf).max()
+    Rf = np.fft.fft(derot, axis=1)[:, occ]
+    g = Rf @ np.conj(Rf[0])
+    g /= np.abs(g)
+    H = np.mean(Rf / g[:, None], 0) / Xf[occ]
+    model = g[:, None] * (H * Xf[occ])[None, :]
+    resid = Rf - model
+    snr = 10 * np.log10(np.sum(np.abs(model) ** 2) / np.sum(np.abs(resid) ** 2))
+    g = g * np.sqrt(np.sum(np.abs(Rf) ** 2, 1) / np.sum(np.abs(model[0]) ** 2))
     print(f"RX: peak at lag {lag}/{L}, peak/median {pslr:.1f} dB, CFO {cfo:+.0f} Hz "
           f"({cfo / a.freq * 1e6:+.2f} ppm), SNR {snr:.1f} dB over {aligned.shape[0]} periods, "
           f"RX gain {gain:.0f} dB, |g| spread {np.std(np.abs(g)) / np.mean(np.abs(g)) * 100:.1f} %")
+    if a.diag:
+        per = 10 * np.log10(np.sum(np.abs(model) ** 2, 1) / np.sum(np.abs(resid) ** 2, 1))
+        print("per-period SNR (dB):", " ".join(f"{v:.0f}" for v in per))
+        np.save(a.diag, r)
 
 
 ap = argparse.ArgumentParser()
@@ -110,5 +123,6 @@ ap.add_argument("--freq", type=float, default=915e6)
 ap.add_argument("--rate", type=float, default=5e6)
 ap.add_argument("--tx-gain", type=float, default=40.0)
 ap.add_argument("--seconds", type=float, default=60.0)
+ap.add_argument("--diag", metavar="FILE.npy", help="rx: print per-period SNR and save the capture")
 a = ap.parse_args()
 run_tx(a) if a.mode == "tx" else run_rx(a)

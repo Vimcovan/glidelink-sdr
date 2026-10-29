@@ -13,6 +13,14 @@ AD9361、AXI ADC / DDS、AXI DMAC 与 IIO DMA 缓冲（均编进内核），以�
 | `build_zocl.sh` | 针对新内核编译 XRT `202410.2.17.319` 的 zocl（PYNQ 的 DMA 缓冲分配依赖它） |
 | `build_wilc.sh` | 编译板载 WiFi（WILC3000）驱动 `wilc-sdio.ko` |
 
+`build_kernel.sh` 编译前打上 `patches/` 中的补丁：
+
+- `0001-iio-buffer-dma-cached-mmap-blocks.patch`：IIO DMA 缓冲（libiio 0.2x 使用的 mmap 块接口）在 DMA 设备不是缓存一致时
+  改用可缓存的页，并在交给 DMA 前、交回 CPU 时做缓存维护。原实现用 `dma_alloc_coherent`，在非一致设备上 CPU 以不可缓存方式
+  映射，读取接收块只有约 150 MB/s，RX 在约 19 MSPS 封顶。PYNQ-ZU 的启动程序没有为 HPC 端口打开 CCI 侦听，
+  设备树不能标 `dma-coherent`（标了以后 axi_dmac 读到缓存中的旧描述符而停住），所以走这条路。
+  内核参数 `industrialio_buffer_dma.cached_blocks=0` 恢复原行为。
+
 安装到 SD 卡：`image.ub` 放到启动分区（原文件另存为 `image.ub.pynq-6.6.10`），模块放到根文件系统的
 `/lib/modules/6.6.0-adi-glidelink/`，zocl 与 wilc-sdio 放到其中的 `updates/` 并运行 `depmod`。
 

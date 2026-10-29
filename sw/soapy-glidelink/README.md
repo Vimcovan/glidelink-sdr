@@ -26,8 +26,13 @@ SoapySDRUtil --probe="driver=glidelink"
 
 ## 测试
 
-`sw/tests/tone_loopback.py`：TX 发单音，RX 接收并给出频谱峰值。打开 AD9361 内部数字环回
-（`echo 1 > /sys/kernel/debug/iio/iio:device1/loopback`）时可不经射频验证整条数据通路。
+| 脚本（`sw/tests/`） | 作用 |
+|---|---|
+| `tone_loopback.py` | TX 发单音，RX 接收并给出频谱峰值；打开 AD9361 内部数字环回时可不经射频验证数据通路 |
+| `ramp_loopback.py` | 经 AD9361 数字环回逐样点核对收发数据（I 为连续计数，Q 为 TX 缓冲区序号），走 Soapy 模块 |
+| `ramp_loopback_iio.c` | 同上，C 语言直接用 libiio，用于 Python 跟不上的高采样率 |
+| `known_waveform.py` | 两板之间：一块循环发 Zadoff-Chu 序列，另一块相关检测，给出定时、频偏与信噪比 |
 
-板上实测：RX 与 TX 各自在 10 MSPS 连续流化无丢失，TX 在 30.72 MSPS 可满速；RX 在约 19 MSPS 封顶。
-后者的原因推测为 DMA 缓冲区对 CPU 不可缓存（设备树叠加未标 `dma-coherent`，HPC 端口未设置一致性），CPU 读未缓存内存慢。
+板上实测（内核打上 `os/kernel/patches/0001` 之后）：Soapy 模块 RX、TX 各自 61.44 MSPS 满速；
+`ramp_loopback_iio` 在 61.44 MSPS 全双工下连续 20 s 逐样点核对无丢失、无旧数据。
+Python 收发同时进行时约 5 MSPS 以内无丢失，再高受 Python 本身速度限制。

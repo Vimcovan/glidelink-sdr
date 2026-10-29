@@ -1,0 +1,161 @@
+diff -ruN a/drivers/iio/buffer/industrialio-buffer-dma.c b/drivers/iio/buffer/industrialio-buffer-dma.c
+--- a/drivers/iio/buffer/industrialio-buffer-dma.c	2026-10-29 23:19:44.352255931 +0900
++++ b/drivers/iio/buffer/industrialio-buffer-dma.c	2026-10-29 23:19:44.355048648 +0900
+@@ -20,6 +20,7 @@
+ #include <linux/dma-buf.h>
+ #include <linux/dma-fence.h>
+ #include <linux/dma-mapping.h>
++#include <linux/dma-map-ops.h>
+ #include <linux/sizes.h>
+ 
+ /*
+@@ -98,6 +99,77 @@
+ #ifdef CONFIG_IIO_DMA_BUF_MMAP_LEGACY
+ static unsigned int iio_dma_buffer_max_block_size = SZ_16M;
+ module_param_named(max_block_size, iio_dma_buffer_max_block_size, uint, 0644);
++
++/*
++ * On a DMA device that is not cache coherent, dma_alloc_coherent() gives memory
++ * that the CPU maps uncached, and reading a received block from it is slow
++ * (about 150 MB/s on ZynqMP). With cached_blocks the blocks are ordinary
++ * cacheable pages instead, mapped cacheable to userspace, and the caches are
++ * maintained explicitly: before a block is handed to the DMA and, for blocks
++ * the device writes, again when it is handed back to the CPU.
++ */
++static bool iio_dma_buffer_cached = true;
++module_param_named(cached_blocks, iio_dma_buffer_cached, bool, 0644);
++MODULE_PARM_DESC(cached_blocks,
++		 "Use cacheable mmap blocks with explicit cache maintenance on non-coherent DMA devices");
++
++static enum dma_data_direction iio_dma_buffer_dir(struct iio_dma_buffer_queue *queue)
++{
++	return queue->buffer.direction == IIO_BUFFER_DIRECTION_IN ?
++		DMA_FROM_DEVICE : DMA_TO_DEVICE;
++}
++
++static int iio_dma_buffer_alloc_mem(struct iio_dma_buffer_queue *queue,
++				    struct iio_dma_buffer_block *block, size_t size)
++{
++	struct page *page;
++
++	if (iio_dma_buffer_cached && !dev_is_dma_coherent(queue->dev)) {
++		page = dma_alloc_pages(queue->dev, PAGE_ALIGN(size), &block->phys_addr,
++				       DMA_BIDIRECTIONAL, GFP_KERNEL);
++		if (!page)
++			return -ENOMEM;
++		block->vaddr = page_address(page);
++		block->cached = true;
++		return 0;
++	}
++
++	block->vaddr = dma_alloc_coherent(queue->dev, PAGE_ALIGN(size),
++					  &block->phys_addr, GFP_KERNEL);
++	return block->vaddr ? 0 : -ENOMEM;
++}
++
++static void iio_dma_buffer_free_mem(struct iio_dma_buffer_block *block)
++{
++	struct device *dev = block->queue->dev;
++	size_t size = PAGE_ALIGN(block->block.size);
++
++	if (block->cached)
++		dma_free_pages(dev, size, virt_to_page(block->vaddr), block->phys_addr,
++			       DMA_BIDIRECTIONAL);
++	else
++		dma_free_coherent(dev, size, block->vaddr, block->phys_addr);
++}
++
++/* Before the DMA owns the block: write back (TX) or invalidate (RX) the CPU caches */
++static void iio_dma_buffer_sync_for_device(struct iio_dma_buffer_queue *queue,
++					   struct iio_dma_buffer_block *block)
++{
++	if (block->cached)
++		dma_sync_single_for_device(queue->dev, block->phys_addr,
++					   PAGE_ALIGN(block->block.size),
++					   iio_dma_buffer_dir(queue));
++}
++
++/* Back to the CPU: drop lines speculatively fetched while the device wrote (RX) */
++static void iio_dma_buffer_sync_for_cpu(struct iio_dma_buffer_queue *queue,
++					struct iio_dma_buffer_block *block)
++{
++	if (block->cached)
++		dma_sync_single_for_cpu(queue->dev, block->phys_addr,
++					PAGE_ALIGN(block->block.size),
++					iio_dma_buffer_dir(queue));
++}
+ #endif
+ 
+ static void iio_buffer_block_release(struct kref *kref)
+@@ -109,8 +181,7 @@
+ 	WARN_ON(block->fileio && block->state != IIO_BLOCK_STATE_DEAD);
+ 
+ #ifdef CONFIG_IIO_DMA_BUF_MMAP_LEGACY
+-	dma_free_coherent(block->queue->dev, PAGE_ALIGN(block->block.size),
+-					block->vaddr, block->phys_addr);
++	iio_dma_buffer_free_mem(block);
+ #else
+ 	if (block->fileio) {
+ 		dma_free_coherent(queue->dev, PAGE_ALIGN(block->size),
+@@ -498,6 +569,9 @@
+ 
+ 	block->state = IIO_BLOCK_STATE_ACTIVE;
+ 	iio_buffer_block_get(block);
++#ifdef CONFIG_IIO_DMA_BUF_MMAP_LEGACY
++	iio_dma_buffer_sync_for_device(queue, block);
++#endif
+ 
+ 	ret = queue->ops->submit(queue, block);
+ 	if (ret) {
+@@ -530,9 +604,7 @@
+ 	if (!block)
+ 		return NULL;
+ 
+-	block->vaddr = dma_alloc_coherent(queue->dev, PAGE_ALIGN(size),
+-					  &block->phys_addr, GFP_KERNEL);
+-	if (!block->vaddr) {
++	if (iio_dma_buffer_alloc_mem(queue, block, size)) {
+ 		kfree(block);
+ 		return NULL;
+ 	}
+@@ -685,6 +757,9 @@
+ 			ret = 0;
+ 			goto out_unlock;
+ 		}
++#ifdef CONFIG_IIO_DMA_BUF_MMAP_LEGACY
++		iio_dma_buffer_sync_for_cpu(queue, block);
++#endif
+ 		queue->fileio.pos = 0;
+ 	} else {
+ 		block = queue->fileio.active_block;
+@@ -990,6 +1065,7 @@
+ 		ret = -EAGAIN;
+ 		goto out_unlock;
+ 	}
++	iio_dma_buffer_sync_for_cpu(queue, dma_block);
+ 
+ 	*block = dma_block->block;
+ 
+@@ -1048,6 +1124,10 @@
+ 
+ 	vma->vm_ops->open(vma);
+ 
++	if (block->cached)
++		return dma_mmap_pages(queue->dev, vma, vma->vm_end - vma->vm_start,
++				      virt_to_page(block->vaddr));
++
+ 	return dma_mmap_coherent(queue->dev, vma, block->vaddr,
+ 		block->phys_addr, vma->vm_end - vma->vm_start);
+ }
+diff -ruN a/include/linux/iio/buffer-dma.h b/include/linux/iio/buffer-dma.h
+--- a/include/linux/iio/buffer-dma.h	2026-10-29 23:19:44.352459670 +0900
++++ b/include/linux/iio/buffer-dma.h	2026-10-29 23:19:44.354351121 +0900
+@@ -80,6 +80,8 @@
+ 
+ 	bool cyclic;
+ 	bool fileio;
++	/* Legacy mmap block in cacheable memory, synced around each DMA transfer */
++	bool cached;
+ 
+ 	struct sg_table *sg_table;
+ 	struct dma_fence *fence;
