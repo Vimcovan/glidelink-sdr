@@ -21,8 +21,24 @@ AD9361、AXI ADC / DDS、AXI DMAC 与 IIO DMA 缓冲（均编进内核），以�
   映射，读取接收块只有约 150 MB/s，RX 在约 19 MSPS 封顶。PYNQ-ZU 的启动程序没有为 HPC 端口打开 CCI 侦听，
   设备树不能标 `dma-coherent`（标了以后 axi_dmac 读到缓存中的旧描述符而停住），所以走这条路。
   内核参数 `industrialio_buffer_dma.cached_blocks=0` 恢复原行为。
+- `0002-dma-axi-dmac-sg-queue-full.patch`：AXI DMAC 分散聚集模式下限制同时交给硬件的传输数。两块 AXI DMAC（版本 0x40565）
+  支持硬件分散聚集，`dma-axi-dmac` 因此走该模式，而该模式下驱动提交传输时不检查硬件队列，完成中断又不看传输编号，
+  按列表顺序逐个结束描述符。同时交给硬件的传输超过约 5 个时，多出的传输不执行却被报告完成：IIO 内核缓冲块数为 N（N > 5）时，
+  开始传输后客户端收到 N − 5 个从未写过的块（开头为全 0，块被重复使用后为旧数据），TX 有 N − 5 个缓冲没有发出去。
+  libiio 本地默认 4 块，不受影响；网络客户端经 iiod 设置块数时会碰到，例如 MathWorks ADALM-Pluto 支持包
+  （`sdrrx('Pluto', RadioID='ip:…')`）开头有 3 帧全 0，随后 AGC 等处理出错，GQRX、GNU Radio 的 `ip:` 地址也一样。
+  补丁做三件事：分散聚集模式下同时交给硬件的传输最多 4 个（`AXI_DMAC_SG_MAX_QUEUED`），其余描述符留在驱动队列中，
+  每完成一个传输补交一个；提交前同样检查 START_TRANSFER（队列满时临时打开"队列有空位"中断等待）；完成中断按
+  TRANSFER_DONE 中的传输编号结束描述符，一次中断可结束多个，已被前一次中断结束的传输不会再次结束别的描述符。
+  只查 START_TRANSFER 不够：实测硬件接受了请求，排得更深的传输仍会丢失，所以以 4 个为上限。
+  这样客户端可以请求任意块数，多出的块作为软件侧余量，不再丢数据。
+  验证（两块板）：板上本地与经 iiod 网络读取，内核块数 4～64、块长 512～262144 个样点，无全 0 块，
+  也无重复的旧数据（按 256 个样点分段比对整段数据）；`iio_readdev -u ip:… -b 11226 -s 800000` 无全 0 块；
+  Pluto 支持包 `sdrrx` 读 1 MSPS、240 帧无全 0 帧；`sw/tests/ramp_loopback_iio.c` 全双工数字回环
+  30.72 / 50 MSPS、内核块数 4～32，逐样点无误，TX 无欠载、无缺失缓冲。
 
-安装到 SD 卡：`image.ub` 放到启动分区（原文件另存为 `image.ub.pynq-6.6.10`），模块放到根文件系统的
+安装到 SD 卡：`image.ub` 放到启动分区（原文件另存为 `image.ub.pynq-6.6.10`；两块板上
+`image.ub.cached-mmap-20261029` 为加入补丁 0002 之前的内核），模块放到根文件系统的
 `/lib/modules/6.6.0-adi-glidelink/`，zocl 与 wilc-sdio 放到其中的 `updates/` 并运行 `depmod`。
 
 ## WiFi 驱动

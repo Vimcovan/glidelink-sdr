@@ -9,8 +9,8 @@
 // before the 3 already queued have played out. Normal scheduling now and then keeps it away
 // for 3 to 7 ms, so the buffers default to 262144 samples (5.2 ms at 50 MSPS, 15 ms of
 // slack); with 65536 the slack is 3.9 ms and a long run occasionally underflows (TX_UNDERFLOW,
-// then broken data). More kernel buffers do not help: the AXI DMAC (scatter-gather mode) runs
-// at most about 4 queued transfers, and blocks beyond that are lost (docs/phase3_modules.md 5).
+// then broken data). Before kernel patch 0002 (os/kernel/README.md) more than 5 kernel buffers
+// lost blocks in the AXI DMAC scatter-gather mode (docs/phase3_modules.md 5).
 //
 //   gcc -O2 -o ramp_loopback_iio ramp_loopback_iio.c -liio -lpthread
 //   ./ramp_loopback_iio [rate_sps] [seconds] [buffer_samples]

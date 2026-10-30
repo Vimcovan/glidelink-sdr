@@ -1,0 +1,160 @@
+--- a/drivers/dma/dma-axi-dmac.c
++++ b/drivers/dma/dma-axi-dmac.c
+@@ -101,6 +101,14 @@
+ 
+ #define AXI_DMAC_FLAG_PARTIAL_XFER_DONE BIT(31)
+ 
++/*
++ * In SG mode transfers queued beyond this depth are lost: their descriptors are
++ * never executed, yet each one is later completed by another transfer's EOT, so
++ * the client gets blocks that were never written (zeros at stream start, stale
++ * data later). Extra descriptors wait in the driver until a transfer finishes.
++ */
++#define AXI_DMAC_SG_MAX_QUEUED 4
++
+ /* The maximum ID allocated by the hardware is 31 */
+ #define AXI_DMAC_SG_UNUSED 32U
+ 
+@@ -162,6 +170,8 @@
+ 	bool hw_cyclic;
+ 	bool hw_2d;
+ 	bool hw_sg;
++	bool sot_irq;
++	unsigned int sg_queued;
+ };
+ 
+ struct axi_dmac {
+@@ -227,7 +237,22 @@
+ 	return true;
+ }
+ 
+-static void axi_dmac_start_transfer(struct axi_dmac_chan *chan)
++/*
++ * In SG mode the SOT IRQ is only unmasked while issued descriptors wait for
++ * room in the hardware queue.
++ */
++static void axi_dmac_sg_sot_irq(struct axi_dmac_chan *chan, bool on)
++{
++	struct axi_dmac *dmac = chan_to_axi_dmac(chan);
++
++	if (chan->sot_irq == on)
++		return;
++	chan->sot_irq = on;
++	axi_dmac_write(dmac, AXI_DMAC_REG_IRQ_MASK, on ? 0 : AXI_DMAC_IRQ_SOT);
++}
++
++/* Returns true if a transfer was queued to the hardware */
++static bool axi_dmac_start_transfer(struct axi_dmac_chan *chan)
+ {
+ 	struct axi_dmac *dmac = chan_to_axi_dmac(chan);
+ 	struct virt_dma_desc *vdesc;
+@@ -236,10 +261,22 @@
+ 	unsigned int flags = 0;
+ 	unsigned int val;
+ 
+-	if (!chan->hw_sg) {
+-		val = axi_dmac_read(dmac, AXI_DMAC_REG_START_TRANSFER);
+-		if (val) /* Queue is full, wait for the next SOT IRQ */
+-			return;
++	/*
++	 * The SG mode has the same request queue: a START_TRANSFER written
++	 * while it is full is lost, and the descriptor would then be completed
++	 * by another transfer's EOT without ever having been written.
++	 */
++	if (chan->hw_sg && chan->sg_queued >= AXI_DMAC_SG_MAX_QUEUED)
++		return false; /* Wait for the next EOT */
++
++	val = axi_dmac_read(dmac, AXI_DMAC_REG_START_TRANSFER);
++	if (val) { /* Queue is full, wait for the next SOT IRQ */
++		if (!chan->hw_sg)
++			return false;
++		axi_dmac_sg_sot_irq(chan, true);
++		/* The SOT may have happened before it was unmasked */
++		if (axi_dmac_read(dmac, AXI_DMAC_REG_START_TRANSFER))
++			return false;
+ 	}
+ 
+ 	desc = chan->next_desc;
+@@ -247,7 +284,7 @@
+ 	if (!desc) {
+ 		vdesc = vchan_next_desc(&chan->vchan);
+ 		if (!vdesc)
+-			return;
++			return false;
+ 		list_move_tail(&vdesc->node, &chan->active_descs);
+ 		desc = to_axi_dmac_desc(vdesc);
+ 	}
+@@ -256,11 +293,12 @@
+ 	/* Already queued in cyclic mode. Wait for it to finish */
+ 	if (sg->hw->id != AXI_DMAC_SG_UNUSED) {
+ 		sg->schedule_when_free = true;
+-		return;
++		return false;
+ 	}
+ 
+ 	if (chan->hw_sg) {
+ 		chan->next_desc = NULL;
++		chan->sg_queued++;
+ 	} else if (++desc->num_submitted == desc->num_sgs ||
+ 		   desc->have_partial_xfer) {
+ 		if (desc->cyclic)
+@@ -310,6 +348,8 @@
+ 	}
+ 	axi_dmac_write(dmac, AXI_DMAC_REG_FLAGS, flags);
+ 	axi_dmac_write(dmac, AXI_DMAC_REG_START_TRANSFER, 1);
++
++	return true;
+ }
+ 
+ static struct axi_dmac_desc *axi_dmac_active_desc(struct axi_dmac_chan *chan)
+@@ -417,10 +457,20 @@
+ 		if (active->cyclic) {
+ 			vchan_cyclic_callback(&active->vdesc);
+ 		} else {
+-			list_del(&active->vdesc.node);
+-			vchan_cookie_complete(&active->vdesc);
+-			active = axi_dmac_active_desc(chan);
+-			start_next = !!active;
++			/*
++			 * Several transfers can finish before the IRQ is
++			 * handled, and the EOT of a transfer already completed
++			 * that way can still be pending: complete each
++			 * descriptor whose transfer ID is done, in order.
++			 */
++			while (active && !active->cyclic &&
++			       (BIT(active->sg[0].hw->id) & completed_transfers)) {
++				list_del(&active->vdesc.node);
++				vchan_cookie_complete(&active->vdesc);
++				active = axi_dmac_active_desc(chan);
++				chan->sg_queued--;
++			}
++			start_next = true;
+ 		}
+ 	} else {
+ 		do {
+@@ -479,8 +529,12 @@
+ 		start_next = axi_dmac_transfer_done(&dmac->chan, completed);
+ 	}
+ 	/* Space has become available in the descriptor queue */
+-	if ((pending & AXI_DMAC_IRQ_SOT) || start_next)
+-		axi_dmac_start_transfer(&dmac->chan);
++	if ((pending & AXI_DMAC_IRQ_SOT) || start_next) {
++		while (axi_dmac_start_transfer(&dmac->chan) && dmac->chan.hw_sg)
++			;
++	}
++	if (dmac->chan.hw_sg && list_empty(&dmac->chan.vchan.desc_issued))
++		axi_dmac_sg_sot_irq(&dmac->chan, false);
+ 	spin_unlock(&dmac->chan.vchan.lock);
+ 
+ 	return IRQ_HANDLED;
+@@ -496,6 +550,10 @@
+ 	spin_lock_irqsave(&chan->vchan.lock, flags);
+ 	axi_dmac_write(dmac, AXI_DMAC_REG_CTRL, 0);
+ 	chan->next_desc = NULL;
++	if (chan->hw_sg) {
++		axi_dmac_sg_sot_irq(chan, false);
++		chan->sg_queued = 0;
++	}
+ 	vchan_get_all_descriptors(&chan->vchan, &head);
+ 	list_splice_tail_init(&chan->active_descs, &head);
+ 	spin_unlock_irqrestore(&chan->vchan.lock, flags);
