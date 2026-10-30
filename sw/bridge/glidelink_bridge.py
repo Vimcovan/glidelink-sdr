@@ -142,6 +142,9 @@ class Bridge:
     def config(self, r):
         d, p = self.dev, self.phy
         if "rate" in r:
+            if self.burst is not None and float(r["rate"]) != d.getSampleRate(SOAPY_SDR_TX, 0):
+                self.close_burst()                       # the burst stream turns burst times into
+                                                         # samples at the rate it was opened with
             set_bb_rate(float(r["rate"]))
         for key, direction in (("freq", None), ("rx_freq", SOAPY_SDR_RX), ("tx_freq", SOAPY_SDR_TX)):
             if key in r:

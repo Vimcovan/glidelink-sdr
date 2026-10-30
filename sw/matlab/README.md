@@ -37,9 +37,20 @@ USRP Radio 和 for Analog Devices ADALM-Pluto Radio。
 | `official_freq_correction.m` | Frequency Correction for ADALM-PLUTO Radio | 三个单音、80 kHz 单音估计 ppm、校正值的叠加公式 | Pluto 的 `FrequencyCorrection` 换成 AD9361 驱动的 `xo_correction`；1 MSPS（原 200 kSPS） | 板间 −0.85 ppm，校正后残差约 10 Hz；发射端 +1 ppm 后重新估计，残差约 10 Hz |
 | `official_fm.m` | FM Demodulation and Spectrum Analysis with USRP Radio | 宽带频谱与峰值、`comm.FMBroadcastDemodulator`（立体声） | 宽带中心 90 MHz（日本波段）；窄带 960 kSPS；`source = "boards"` 时由发射板在 915 MHz 发调频立体声广播 | 板间：导频 36 dB，左声道信噪比约 25 dB（无射频回环 41.6 dB），左右隔离 43 dB；空中只收到弱台 |
 | `official_wlan_image.m` | Image Transmission and Reception Using 802.11 Waveform and SDR | 同样的步骤和 WLAN 工具箱函数（MAC 分片、802.11a MCS 6、检测、同步、信道估计、L-SIG、解调、FCS），`helperInterpretLSIG` | 用整段采集里每个分片 FCS 正确的那一份（原例程遇到第一个重复序号即停）；跳过其他 WLAN 的帧 | 2432 MHz：3 次中 2 次 11 包全收、BER 0、EVM 约 6 %；另一次 7 包（WiFi 干扰） |
-| `official_wlan_beacons.m` | WLAN Beacon Receiver Using Software-Defined Radio | `recoverDSSSBits` / `recoverOFDMBits`、`wlanMPDUDecode`、按主信道去重 | 每信道采 3 个信标间隔（原 1 个）；不查厂商 | 见下 |
+| `official_wlan_beacons.m` | WLAN Beacon Receiver Using Software-Defined Radio | `recoverDSSSBits` / `recoverOFDMBits`、`wlanMPDUDecode`、按主信道去重 | 每信道采 3 个信标间隔（原 1 个）；不查厂商 | 例程自带的录制数据：5 包、4 个信标；空中 OFDM 2.4 GHz 13 个信道解出 1323 个包，信标只解出 1 个接入点（信噪比 18 dB）；DSSS 解出 0 包。915 MHz 天线在 2.4 GHz 收不到较远的接入点 |
+
+| `official_fmcw.m` | FMCW Radar Waveform Based Range Calculation Using Time Trigger | `phased.FMCWWaveform`、`dechirp`、按拍频算距离（`beat2range`） | 同一块板（发射板）上 `txBurst` 定时发射，接收数据的时间戳定位触发时刻；20 MSPS、对称扫频（原 30 MSPS、0～15 MHz，带宽相同） | 拍频 42.1 kHz → 421 m，与互相关测得的 56 个采样（2.80 µs）一致：即板上发→收的固定延迟 56 个采样 |
+
+未移植：USRP 的两个"突发模式缓冲"例程是主机端缓冲选项，我们的接收在板上连续采集、发射在板上循环或定时，
+没有对应功能；Alamouti 2×1 需要一块板两路发射，平台目前每块板一路收、一路发。
 
 移植时发现的平台问题与处理：
+
+- 桥接服务的突发发射流按打开时的采样率把突发时间换算成采样数。同一连接里改采样率后，突发在错误时刻反复发出。
+  已改为改采样率时关闭突发流，下一个突发按新采样率重新打开（两块板已更新）。
+- 采样率高于 20 MSPS 时发射通路跟不上：30 MSPS 循环发射的波形中间有空隙，定时突发的间隔按约 0.65 的比例缩短。
+  20 MSPS 及以下正常。原因待查。
+- 接收板的镜像（`glidelink_rx`）没有主机到 DAC 的发射数据通路，只有发射板的镜像能收发。
 
 - 接收板的发射本振与接收本振同频时会漏进接收通道，在 −0.6 kHz 处形成一根约 −53 dBFS 的谱线（与载频无关）。
   只接收的脚本把接收板的发射本振移开（`TxFreq` 设为接收频率 +10 MHz 以上）。
