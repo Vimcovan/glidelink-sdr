@@ -75,6 +75,7 @@ struct Stream {
 	uint32_t timedFlag = 0;         // TX: header flag of a timed packet (by shell version)
 	bool flagsShared = false;       // shell >= 1.3: one set of flags in both directions
 	bool pktEob = false;            // RX: the current packet ends a burst
+	bool rxShifted = false;         // RX, host port 0: samples arrive shifted left by 4 (shell >= 1.5)
 };
 
 const uint32_t HDR_MAGIC = 0xA5;
@@ -82,6 +83,9 @@ const uint32_t HDR_MAGIC = 0xA5;
 // shell 1.3 the TX side had its own bit 0 = timed
 const uint32_t FLAG_DROPPED = 1u << 0, FLAG_EOB = 1u << 1, FLAG_TIMED = 1u << 2, FLAG_TIMED_OLD = 1u << 0;
 const unsigned SHELL_VERSION_HEADERS = 0x00010100, SHELL_VERSION_FLAGS = 0x00010300;
+// from 1.5 the RX streamer passes the 12-bit ADC sample shifted left by 4 (16-bit
+// full scale in the PL, as the DAC side); CS16 stays the 12-bit sample
+const unsigned SHELL_VERSION_RX16 = 0x00010500;
 // shell registers (hw/library/glidelink_shell/glidelink_shell_regs.v)
 const unsigned REG_VERSION = 0x004, REG_CONFIG = 0x054, REG_PORT_RESET = 0x05C, REG_ROUTE = 0x1000;
 const unsigned CFG_RX_ENABLE = 1u << 0, ROUTE_NONE = 0xF;
@@ -527,6 +531,7 @@ public:
 		}
 		s->headers = shell && readRegister("FPGA", REG_VERSION) >= SHELL_VERSION_HEADERS && wantHeaders &&
 			     s->channels.size() == 1 && s->channels[0] == 0;
+		s->rxShifted = dir == SOAPY_SDR_RX && shell && readRegister("FPGA", REG_VERSION) >= SHELL_VERSION_RX16;
 		if (s->headers)
 			setFlagBits(s);
 
@@ -630,14 +635,14 @@ public:
 			if (s->cf32) {
 				float *dst = static_cast<float *>(buffs[i]);
 				for (size_t j = 0; j < n; j++, p += 2 * s->numSlots) {
-					dst[2 * j] = p[0] / fullScale(s);
-					dst[2 * j + 1] = p[1] / fullScale(s);
+					dst[2 * j] = fromWord(s, p[0]) / fullScale(s);
+					dst[2 * j + 1] = fromWord(s, p[1]) / fullScale(s);
 				}
 			} else {
 				int16_t *dst = static_cast<int16_t *>(buffs[i]);
 				for (size_t j = 0; j < n; j++, p += 2 * s->numSlots) {
-					dst[2 * j] = p[0];
-					dst[2 * j + 1] = p[1];
+					dst[2 * j] = fromWord(s, p[0]);
+					dst[2 * j + 1] = fromWord(s, p[1]);
 				}
 			}
 		}
@@ -694,6 +699,12 @@ private:
 
 	// host port 0 carries AD9361 samples, host port 1 the module's words as they are
 	static float fullScale(const Stream *s) { return s->port == 0 ? 2048.0f : 32768.0f; }
+
+	// a received word as a CS16 value: the 12-bit sample on host port 0
+	static int16_t fromWord(const Stream *s, int16_t v)
+	{
+		return s->rxShifted && s->port == 0 ? static_cast<int16_t>(v >> 4) : v;
+	}
 
 	static int16_t toWord(const Stream *s, long v)
 	{
@@ -811,7 +822,11 @@ private:
 		if (s->cf32) {
 			float *dst = static_cast<float *>(out);
 			for (size_t j = 0; j < 2 * n; j++)
-				dst[j] = p[j] / fullScale(s);
+				dst[j] = fromWord(s, p[j]) / fullScale(s);
+		} else if (s->rxShifted) {
+			int16_t *dst = static_cast<int16_t *>(out);
+			for (size_t j = 0; j < 2 * n; j++)
+				dst[j] = fromWord(s, p[j]);
 		} else {
 			std::memcpy(out, p, 4 * n);
 		}

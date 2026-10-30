@@ -1,0 +1,8 @@
+# OFDM PHY test image (phase 4.2 / 4.3): the competition transmitter and receiver on
+# the 100 MHz slot clock, for loopback tests on one board (TX -> AD9361 digital
+# loopback -> RX).
+name: phy_test
+slots:
+  - {module: passthrough}
+  - {module: ofdm_tx, clock: 100}
+  - {module: ofdm_rx, clock: 100}

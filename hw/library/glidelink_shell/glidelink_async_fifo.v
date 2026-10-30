@@ -5,6 +5,11 @@
 // side's pointer arrives through a two-stage synchroniser, so the write side
 // may see the FIFO fuller and the read side emptier than it is, never the
 // other way round.
+// Each side's Gray pointer is recomputed from its binary pointer every cycle,
+// not only on a write / read, so the two can disagree for one cycle at most:
+// a clock glitch that upsets one of them (the AD9361 data clock glitches while
+// the driver re-initialises the chip) heals instead of leaving the FIFO stuck
+// full (the writer's binary pointer ahead of what the reader was told).
 // A reset on either side resets both: each side's reset is held for 16 of
 // its cycles and passed to the other side through a synchroniser. (The
 // AD9361 side is reset by itself when the driver resets the axi_ad9361
@@ -15,7 +20,8 @@
 
 module glidelink_async_fifo #(
   parameter WIDTH = 32,
-  parameter ADDR_WIDTH = 10                // depth = 2^ADDR_WIDTH
+  parameter ADDR_WIDTH = 10,               // depth = 2^ADDR_WIDTH
+  parameter RAM_STYLE = "block"            // or "distributed" (LUTRAM) for small FIFOs
 ) (
   input                       wr_clk,
   input                       wr_rst,
@@ -36,7 +42,7 @@ module glidelink_async_fifo #(
 
   localparam DEPTH = 1 << ADDR_WIDTH;
 
-  (* ram_style = "block" *) reg [WIDTH-1:0] mem [0:DEPTH-1];
+  (* ram_style = RAM_STYLE *) reg [WIDTH-1:0] mem [0:DEPTH-1];
 
   function [ADDR_WIDTH:0] bin2gray(input [ADDR_WIDTH:0] b);
     bin2gray = b ^ (b >> 1);
@@ -93,10 +99,9 @@ module glidelink_async_fifo #(
     end else begin
       rd_ptr_gray_m1 <= rd_ptr_gray;
       rd_ptr_gray_m2 <= rd_ptr_gray_m1;
-      if (wr_en && !wr_full) begin
+      if (wr_en && !wr_full)
         wr_ptr <= wr_ptr + 1'b1;
-        wr_ptr_gray <= bin2gray(wr_ptr + 1'b1);
-      end
+      wr_ptr_gray <= bin2gray(wr_ptr);
     end
   end
 
@@ -128,9 +133,9 @@ module glidelink_async_fifo #(
     end else begin
       wr_ptr_gray_m1 <= wr_ptr_gray;
       wr_ptr_gray_m2 <= wr_ptr_gray_m1;
+      rd_ptr_gray <= bin2gray(rd_ptr);
       if (fetch) begin
         rd_ptr <= rd_ptr + 1'b1;
-        rd_ptr_gray <= bin2gray(rd_ptr + 1'b1);
         out_valid <= 1'b1;
       end else if (rd_en) begin
         out_valid <= 1'b0;

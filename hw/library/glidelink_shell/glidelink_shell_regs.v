@@ -19,9 +19,13 @@
 //   0x058  HOST0_RX_OVF RO  host port 0 RX: words the DMA could not take (FIFO interface)
 //   0x05C  PORT_RESET   W   bit 0: flush host port 0 RX, bit 1: flush host port 0 TX (and the
 //                           RF TX streamer), bit 2: reset slot 0, bit 3 / 4: flush host port 1
-//                           RX / TX, bit 5 / 6: reset slot 1 / 2; held 16 cycles, self-clearing
+//                           RX / TX, bit 4 + k: slot k (k >= 1); held 16 cycles, self-clearing
 //   0x060  HOST1_TX_ERR RO  host port 1 TX: words dropped looking for a packet header
 //   0x064  HOST1_RX_OVF RO  host port 1 RX: words the DMA could not take
+//   0x068  TX_DEBUG     RO  TX streamer state (diagnostics): [7:0] {take_hdr, data_empty,
+//                           hdr_empty, eob, first_wait, state[1:0]} (sample clock), [15:8]
+//                           {cdc_full, buf_empty, s_in_pkt, data_full, hdr_full} (processing clock)
+//   0x06C / 0x070 TX_WAIT_LO / HI  RO  send time of the packet the TX streamer holds (diagnostics)
 //   0x050  RX_PKT_LEN   RW  samples per RX packet (default 4096)
 //   0x054  CONFIG       RW  bit 0: RX enable (default 1), bit 1: drop late TX packets (default 1),
 //                           bit 2: host port 0 RX adds packet headers, bit 3: host port 0 TX
@@ -46,6 +50,7 @@ module glidelink_shell_regs #(
   parameter [7:0] HOST_TX = 8'd1,
   parameter [7:0] SLOTS = 8'd0,
   parameter N_SNK = 4,
+  parameter PRST_W = 7,                   // PORT_RESET bits: host ports, then slots
   parameter [N_SNK*4-1:0] ROUTE_RESET = {4'hF, 4'hF, 4'd0, 4'd1}
 ) (
   // AXI4-Lite slave (CPU clock)
@@ -81,6 +86,9 @@ module glidelink_shell_regs #(
   input     [31:0]  rx_overflow_gray,
   input     [31:0]  tx_underflow_gray,
   input     [31:0]  tx_late_gray,
+  input      [7:0]  tx_dbg_l,
+  input      [7:0]  tx_dbg_s,
+  input     [63:0]  tx_dbg_time,
   input     [31:0]  host0_tx_err_gray,
   input     [31:0]  host0_rx_ovf_gray,
   input     [31:0]  host1_tx_err_gray,
@@ -94,12 +102,12 @@ module glidelink_shell_regs #(
   output            host0_tx_hdr,
   output            host1_rx_hdr,
   output            host1_tx_hdr,
-  output     [6:0]  port_reset,             // CPU clock, 16-cycle pulses
+  output [PRST_W-1:0] port_reset,           // CPU clock, 16-cycle pulses
   output [N_SNK*4-1:0] route
 );
 
   localparam [31:0] ID = 32'h474C4B53;
-  localparam [31:0] VERSION = 32'h00010400;    // 1.4.0: three slots (passthrough, NCO, FIR)
+  localparam [31:0] VERSION = 32'h00010500;    // 1.5.0: URAM buffers, RX samples 16-bit full scale
 
   // ---------------------------------------------------------------------------
   // AXI4-Lite: one outstanding write and one outstanding read
@@ -124,7 +132,7 @@ module glidelink_shell_regs #(
   reg  [15:0] pkt_len = 16'd4096;
   reg  [5:0]  cfg = 6'b000011;
   reg  [N_SNK*4-1:0] routes = ROUTE_RESET;
-  reg  [6:0]  prst = 7'd0;
+  reg  [PRST_W-1:0] prst = 0;
   reg  [3:0]  prst_cnt = 4'd0;
   reg  [31:0] time_set_lo = 32'd0, time_set_hi = 32'd0;
 
@@ -182,19 +190,19 @@ module glidelink_shell_regs #(
       time_set_lo <= 32'd0;
       time_set_hi <= 32'd0;
       load_req <= 1'b0;
-      prst <= 7'd0;
+      prst <= 0;
       prst_cnt <= 4'd0;
     end else begin
       if (prst_cnt != 4'd0)
         prst_cnt <= prst_cnt - 4'd1;
       else
-        prst <= 7'd0;
+        prst <= 0;
       if (wr_fire) begin
       case (waddr[12:2])
         11'h003: scratch <= wdata;
         11'h014: if (wdata[15:0] != 16'd0) pkt_len <= wdata[15:0];
         11'h015: cfg <= wdata[5:0];
-        11'h017: if (wdata[6:0] != 7'd0) begin prst <= wdata[6:0]; prst_cnt <= 4'hF; end
+        11'h017: if (wdata[PRST_W-1:0] != 0) begin prst <= wdata[PRST_W-1:0]; prst_cnt <= 4'hF; end
         11'h006: time_set_lo <= wdata;
         11'h007: time_set_hi <= wdata;
         11'h008: if (wdata[0] && !load_pending) load_req <= ~load_req;
@@ -283,12 +291,18 @@ module glidelink_shell_regs #(
   (* ASYNC_REG = "TRUE" *) reg [31:0] herr1_g_m1 = 0, herr1_g_s = 0, rovf1_g_m1 = 0, rovf1_g_s = 0;
   reg  [31:0] rx_overflow = 0, tx_underflow = 0, tx_late = 0, host0_tx_err = 0, host0_rx_ovf = 0;
   reg  [31:0] host1_tx_err = 0, host1_rx_ovf = 0;
+  (* ASYNC_REG = "TRUE" *) reg [15:0] txd_m1 = 16'd0, txd_s = 16'd0;    // diagnostics, quasi-static
+  (* ASYNC_REG = "TRUE" *) reg [63:0] txt_m1 = 64'd0, txt_s = 64'd0;
   always @(posedge s_axi_aclk) begin
     ovf_g_m1 <= rx_overflow_gray;
     ovf_g_s <= ovf_g_m1;
     unf_g_m1 <= tx_underflow_gray;
     unf_g_s <= unf_g_m1;
     late_g_m1 <= tx_late_gray;
+    txd_m1 <= {tx_dbg_s, tx_dbg_l};
+    txd_s <= txd_m1;
+    txt_m1 <= tx_dbg_time;
+    txt_s <= txt_m1;
     late_g_s <= late_g_m1;
     rx_overflow <= gray2bin(ovf_g_s);
     tx_underflow <= gray2bin(unf_g_s);
@@ -341,6 +355,9 @@ module glidelink_shell_regs #(
           11'h015: rdata <= {26'd0, cfg};
           11'h018: rdata <= host1_tx_err;
           11'h019: rdata <= host1_rx_ovf;
+          11'h01A: rdata <= {16'd0, txd_s};
+          11'h01B: rdata <= txt_s[31:0];
+          11'h01C: rdata <= txt_s[63:32];
           default: rdata <= (s_axi_araddr[12] && s_axi_araddr[11:2] < N_SNK) ?
                             {28'd0, routes[s_axi_araddr[11:2]*4 +: 4]} : 32'd0;
         endcase

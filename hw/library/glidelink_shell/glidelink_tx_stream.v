@@ -12,13 +12,18 @@
 // once; either way it is counted in late. Running out of data inside a burst
 // sends zeros and counts one underflow per dry spell. Counters are Gray-coded
 // in l_clk.
+// The data is buffered on the processing side in URAM; a small LUTRAM FIFO,
+// kept full from it every cycle, carries it to l_clk (the processing clock
+// is much faster than the sample rate, so the scheduler never waits on it
+// once a packet's first sample has crossed).
 // ***************************************************************************
 
 `timescale 1ns/100ps
 
 module glidelink_tx_stream #(
-  parameter FIFO_ADDR_WIDTH = 13,
-  parameter HDR_ADDR_WIDTH = 4
+  parameter FIFO_ADDR_WIDTH = 13,          // 8192 samples (URAM)
+  parameter HDR_ADDR_WIDTH = 4,
+  parameter CDC_ADDR_WIDTH = 5             // crossing FIFO, 32 samples (LUTRAM)
 ) (
   // processing side
   input             s_clk,
@@ -39,13 +44,18 @@ module glidelink_tx_stream #(
   input             late_drop,            // quasi-static
   output    [31:0]  underflow_gray,
   output    [31:0]  late_gray,
-  output            dac_dunf              // to axi_ad9361: underflow
+  output            dac_dunf,             // to axi_ad9361: underflow
+
+  // diagnostics (each in its own clock; read through synchronisers, quasi-static)
+  output     [7:0]  dbg_l,                // {1'b0, take_hdr, data_empty, hdr_empty, eob, first_wait, state[1:0]}
+  output     [7:0]  dbg_s,                // {3'b0, cdc_full, buf_empty, s_in_pkt, data_full, hdr_full}
+  output    [63:0]  dbg_start_time
 );
 
   localparam FLAG_EOB = 1, FLAG_TIMED = 2;
 
-  wire        data_full, hdr_full;
-  wire [32:0] data_out;
+  wire        data_full, hdr_full, buf_empty, cdc_full, move;
+  wire [32:0] buf_out, data_out;
   wire        data_empty;
   wire [71:0] hdr_out;
   wire        hdr_empty;
@@ -57,7 +67,7 @@ module glidelink_tx_stream #(
   reg         s_in_pkt = 1'b0;
   wire        s_beat = s_axis_tvalid && s_axis_tready;
 
-  assign s_axis_tready = !data_full && (s_in_pkt || !hdr_full);
+  assign s_axis_tready = !s_reset && !data_full && (s_in_pkt || !hdr_full);   // not while the FIFOs are held in reset
 
   always @(posedge s_clk) begin
     if (s_reset)
@@ -150,17 +160,28 @@ module glidelink_tx_stream #(
   assign underflow_gray = underflow_g;
   assign late_gray = late_g;
   assign dac_dunf = dunf;
+  assign dbg_l = {1'b0, take_hdr, data_empty, hdr_empty, eob, first_wait, state};
+  assign dbg_s = {3'b0, cdc_full, buf_empty, s_in_pkt, data_full, hdr_full};
+  assign dbg_start_time = start_time;
 
   // ---------------------------------------------------------------------------
 
-  glidelink_async_fifo #(.WIDTH(33), .ADDR_WIDTH(FIFO_ADDR_WIDTH)) i_data_fifo (
-    .wr_clk(s_clk), .wr_rst(s_rst), .wr_en(s_beat),
-    .wr_data({s_axis_tlast, s_axis_tdata}),
-    .wr_full(data_full), .wr_level(), .wr_in_reset(s_reset),
+  glidelink_fifo #(.WIDTH(33), .ADDR_WIDTH(FIFO_ADDR_WIDTH), .RAM_STYLE("ultra")) i_data_fifo (
+    .clk(s_clk), .rst(s_reset), .wr_en(s_beat),
+    .wr_data({s_axis_tlast, s_axis_tdata}), .full(data_full),
+    .rd_en(move), .rd_data(buf_out), .empty(buf_empty), .level());
+
+  // keep the crossing FIFO full
+  assign move = !buf_empty && !cdc_full;
+
+  glidelink_async_fifo #(.WIDTH(33), .ADDR_WIDTH(CDC_ADDR_WIDTH), .RAM_STYLE("distributed")) i_cdc_fifo (
+    .wr_clk(s_clk), .wr_rst(s_rst), .wr_en(move),
+    .wr_data(buf_out),
+    .wr_full(cdc_full), .wr_level(), .wr_in_reset(s_reset),
     .rd_clk(l_clk), .rd_rst(l_rst), .rd_en(data_rd),
     .rd_data(data_out), .rd_empty(data_empty), .rd_level(), .rd_in_reset(l_reset));
 
-  glidelink_async_fifo #(.WIDTH(72), .ADDR_WIDTH(HDR_ADDR_WIDTH)) i_hdr_fifo (
+  glidelink_async_fifo #(.WIDTH(72), .ADDR_WIDTH(HDR_ADDR_WIDTH), .RAM_STYLE("distributed")) i_hdr_fifo (
     .wr_clk(s_clk), .wr_rst(s_rst), .wr_en(s_beat && !s_in_pkt),
     .wr_data(s_axis_tuser),
     .wr_full(hdr_full), .wr_level(), .wr_in_reset(),

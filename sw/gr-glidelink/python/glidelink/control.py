@@ -26,10 +26,16 @@ import pmt
 import SoapySDR
 from gnuradio import gr
 
-SINKS = {"rf_tx": 0, "host0_rx": 1, "slot0_in": 2, "host1_rx": 3, "slot1_in": 4, "slot2_in": 5}
-SOURCES = {"rf_rx": 0, "host0_tx": 1, "slot0_out": 2, "host1_tx": 3, "slot1_out": 4, "slot2_out": 5,
+# switch ports: 0 RF, 1 host port 0, 2 slot 0, 3 host port 1, 3 + k slot k (k >= 1);
+# an image has 1 to 11 slots (shell CAPS[31:24])
+_slot_port = lambda k: 2 if k == 0 else 3 + k
+SINKS = {"rf_tx": 0, "host0_rx": 1, "host1_rx": 3, **{f"slot{k}_in": _slot_port(k) for k in range(11)}}
+SOURCES = {"rf_rx": 0, "host0_tx": 1, "host1_tx": 3, **{f"slot{k}_out": _slot_port(k) for k in range(11)},
            "none": 15}
-REG_ROUTE = 0x1000
+REG_ROUTE, REG_PORT_RESET = 0x1000, 0x05C
+# PORT_RESET bit that flushes each sink: RF TX (with the TX streamer), host 0 RX,
+# host 1 RX, slot k (its stream state; registers are kept)
+SINK_FLUSH = {0: 1 << 1, 1: 1 << 0, 3: 1 << 3, **{_slot_port(k): 1 << (2 if k == 0 else 4 + k) for k in range(11)}}
 INTERFACES = ("AD9361", "FPGA")
 
 
@@ -72,9 +78,16 @@ class control(gr.basic_block):
     # routes
 
     def set_route(self, sink, source):
+        """Route sink <- source. When the route changes, the sink is flushed too (PORT_RESET):
+        a sink takes a new route only between packets, and one stalled inside a packet (e.g.
+        a host port nobody reads) would otherwise never get there."""
         s = SOURCES[source] if isinstance(source, str) else int(source)
+        j = SINKS[sink]
         with self.lock:
-            self.dev.writeRegister("FPGA", REG_ROUTE + 4 * SINKS[sink], s)
+            if self.dev.readRegister("FPGA", REG_ROUTE + 4 * j) == s:
+                return
+            self.dev.writeRegister("FPGA", REG_ROUTE + 4 * j, s)
+            self.dev.writeRegister("FPGA", REG_PORT_RESET, SINK_FLUSH[j])
 
     def get_route(self, sink):
         with self.lock:

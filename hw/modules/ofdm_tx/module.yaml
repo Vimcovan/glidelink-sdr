@@ -1,0 +1,32 @@
+# GlideLink user module description (docs/design.md 5.3)
+id: ofdm_tx
+name: OFDM transmitter (DeepJSCC-Q link)
+top: glidelink_ofdm_tx
+source: competition design Vimcovan/glidelink-fpga @ 8367bee, src/hw/tx/rtl/phy (RTL unchanged)
+id_value: 0x4F465458          # "OFTX"
+version: 1.0.0
+clock_mhz: 100                # as designed; the image puts it on the 100 MHz slot clock
+uses: [phy_common]
+ip: [ip/ifft.xci]
+parameters:
+  NSYM: 683
+  FRAME_SYMS: 32768
+data:
+  input: "64-QAM symbols {Q, I}, 12-bit Q10 sign-extended; tlast on symbol 32767 of a frame"
+  output: "20 MSPS samples {Q, I}, 16-bit full scale; one end-of-burst packet per frame (54,960 samples + GAP zeros)"
+registers:
+  - {name: ID, offset: 0x000, access: ro}
+  - {name: VERSION, offset: 0x004, access: ro}
+  - name: CONTROL
+    offset: 0x008
+    access: rw
+    default: 1
+    fields:
+      - {name: enable, bits: 0, doc: "0 holds the input off"}
+      - {name: soft_reset, bits: 1, doc: "self-clearing"}
+      - {name: prbs, bits: 2, doc: "internal random 64-QAM frames instead of the input"}
+  - {name: STATUS, offset: 0x00C, access: ro, fields: [{name: enabled, bits: 0}, {name: prbs, bits: 1}]}
+  - {name: GAP, offset: 0x010, access: rw, default: 1000, doc: "zero samples after each frame"}
+  - {name: FRAMES_OUT, offset: 0x014, access: ro}
+  - {name: TLAST_ERR, offset: 0x018, access: ro}
+  - {name: FRAMES_IN, offset: 0x01C, access: ro}

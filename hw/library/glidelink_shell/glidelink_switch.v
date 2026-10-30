@@ -5,7 +5,10 @@
 // tuser[71:0] and tlast, flattened into vectors (port k at [k*W +: W]).
 // Each sink has a route (source index, 4'hF = none) from the registers.
 // - A sink takes a new route only between packets, and starts forwarding a
-//   source only at the start of one of its packets.
+//   source only at the start of one of its packets, once the source has a
+//   beat to send: an idle route holds nothing, so it can be changed at any
+//   time (a sink that took an idle source at once would keep it until that
+//   source sent a packet).
 // - A source goes to one sink only: if several sinks route the same source,
 //   the lowest-numbered one gets it.
 // - A source that no sink routes is drained (its data is dropped), so an
@@ -140,7 +143,7 @@ module glidelink_switch #(
           if (abort_snk[sj] || abort_src[cur[sj*4 +: 4]] ||
               (snk_valid[sj] && m_ready[sj] && s_last[cur[sj*4 +: 4]]))
             active[sj] <= 1'b0;
-        end else if (r < N_SRC && claim_ok(sj, r, route_s) && !src_in_pkt[r] && !connected[r] &&
+        end else if (r < N_SRC && claim_ok(sj, r, route_s) && s_valid[r] && !src_in_pkt[r] && !connected[r] &&
                      !abort_snk[sj] && !abort_src[r]) begin
           cur[sj*4 +: 4] <= r;
           active[sj] <= 1'b1;

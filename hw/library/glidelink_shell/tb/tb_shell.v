@@ -25,7 +25,12 @@ module tb_shell;
 
   wire [15:0] dac_i, dac_q;
   reg  [15:0] adc_i = 0, adc_q = 0;
-  always @(posedge l_clk) if (dac_valid) begin adc_i <= dac_i; adc_q <= dac_q; end
+  // AD9361 digital loopback: the DAC's 12 MSBs come back as the 12-bit ADC sample
+  // (the RX streamer shifts it back up), so test patterns use bits 15..4 only
+  always @(posedge l_clk) if (dac_valid) begin
+    adc_i <= {{4{dac_i[15]}}, dac_i[15:4]};
+    adc_q <= {{4{dac_q[15]}}, dac_q[15:4]};
+  end
 
   // AXI-Lite master (reads only)
   reg         arvalid = 0, rready = 0;
@@ -71,7 +76,7 @@ module tb_shell;
       if (!tx_valid || tx_ready) begin
         if (($random & 3) != 0) begin
           tx_valid <= 1;
-          tx_data <= {~n_tx[15:0], n_tx[15:0]};
+          tx_data <= {~n_tx[11:0], 4'd0, n_tx[11:0], 4'd0};
           tx_last <= (n_tx % 1000) == 999;
           n_tx = n_tx + 1;
         end else begin
@@ -88,12 +93,12 @@ module tb_shell;
   always @(posedge clk) begin
     rx_ready <= ($random & 7) != 0;
     if (rx_valid && !pause) begin
-      if (!locked && rx_data[15:0] != 0 && rx_data[31:16] == ~rx_data[15:0]) begin
+      if (!locked && rx_data[15:4] != 0 && rx_data == {~rx_data[15:4], 4'd0, rx_data[15:4], 4'd0}) begin
         locked = 1;
-        expect_i = rx_data[15:0];
+        expect_i = rx_data[15:4];
       end
       if (locked) begin
-        if (rx_data !== {~expect_i, expect_i}) begin
+        if (rx_data !== {~expect_i[11:0], 4'd0, expect_i[11:0], 4'd0}) begin
           if (errors < 5) $display("ERROR: RX %h, expected I %h", rx_data, expect_i);
           errors = errors + 1;
         end

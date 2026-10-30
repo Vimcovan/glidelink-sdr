@@ -10,8 +10,8 @@
 // this part was cut off because the packet is longer than 2^MAX_LEN_LOG2
 // samples; the rest follows as further parts with the same flags and the
 // timestamps that continue the first part's. The length is only known at
-// the end, so data is buffered (one maximum part) and the header goes into
-// a small header FIFO that the output reads before the data.
+// the end, so data is buffered (one maximum part, in URAM) and the header
+// goes into a small header FIFO that the output reads before the data.
 // Raw mode (hdr_en = 0): samples pass straight through.
 // ***************************************************************************
 
@@ -122,11 +122,11 @@ module glidelink_host_rx #(
 
   // ---------------------------------------------------------------------------
 
-  glidelink_fifo #(.WIDTH(32), .ADDR_WIDTH(MAX_LEN_LOG2)) i_data (
+  glidelink_fifo #(.WIDTH(32), .ADDR_WIDTH(MAX_LEN_LOG2), .RAM_STYLE("ultra")) i_data (
     .clk(clk), .rst(rst), .wr_en(in_beat && hdr_en), .wr_data(s_data), .full(data_full),
     .rd_en(data_beat), .rd_data(data_out), .empty(data_empty), .level());
 
-  glidelink_fifo #(.WIDTH(88), .ADDR_WIDTH(4)) i_hdr (
+  glidelink_fifo #(.WIDTH(88), .ADDR_WIDTH(4), .RAM_STYLE("distributed")) i_hdr (
     .clk(clk), .rst(rst), .wr_en(part_end && hdr_en),
     .wr_data({flags_now | (cut ? 8'h80 : 8'h00), count + 16'd1, ts_now}), .full(hdr_full),
     .rd_en(hdr_pop), .rd_data(hdr_out), .empty(hdr_empty), .level());

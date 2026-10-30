@@ -1,0 +1,7 @@
+# Test image for the clock-crossing slots (tb_shell4): as demo, with the NCO
+# at 250 MHz and the FIR at 100 MHz.
+name: test_clocks
+slots:
+  - {module: passthrough}
+  - {module: nco, clock: 250}
+  - {module: fir, clock: 100, params: {TAPS: 32}}

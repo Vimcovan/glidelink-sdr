@@ -26,7 +26,12 @@ module tb_shell2;
   end
   wire [15:0] dac_i, dac_q;
   reg  [15:0] adc_i = 0, adc_q = 0;
-  always @(posedge l_clk) if (dac_valid) begin adc_i <= dac_i; adc_q <= dac_q; end
+  // AD9361 digital loopback: the DAC's 12 MSBs come back as the 12-bit ADC sample
+  // (the RX streamer shifts it back up), so test patterns use bits 15..4 only
+  always @(posedge l_clk) if (dac_valid) begin
+    adc_i <= {{4{dac_i[15]}}, dac_i[15:4]};
+    adc_q <= {{4{dac_q[15]}}, dac_q[15:4]};
+  end
 
   // AXI-Lite master
   reg         awvalid = 0, wvalid = 0, bready = 0, arvalid = 0, rready = 0;
@@ -96,7 +101,7 @@ module tb_shell2;
       // being torn down); PORT_RESET cleans up after it
       if (mode == 0 && raw_run && ($random & 3) != 0) begin
         tx_valid <= 1;
-        tx_data <= {~n_tx[15:0], n_tx[15:0]};
+        tx_data <= {~n_tx[11:0], 4'd0, n_tx[11:0], 4'd0};
         tx_last <= (n_tx % 1000) == 999;
         n_tx = n_tx + 1;
       end else if (mode == 1 && frame_pos < frame_len) begin
@@ -123,11 +128,11 @@ module tb_shell2;
     rx_ready <= ($random & 7) != 0;
     if (rx_valid) begin
       if (mode == 0) begin
-        if (!locked && rx_data[15:0] != 0 && rx_data[31:16] == ~rx_data[15:0]) begin
-          locked = 1; expect_i = rx_data[15:0];
+        if (!locked && rx_data[15:4] != 0 && rx_data == {~rx_data[15:4], 4'd0, rx_data[15:4], 4'd0}) begin
+          locked = 1; expect_i = rx_data[15:4];
         end
         if (locked) begin
-          if (rx_data !== {~expect_i, expect_i}) begin
+          if (rx_data !== {~expect_i[11:0], 4'd0, expect_i[11:0], 4'd0}) begin
             if (rx_err < 5) $display("ERROR: RX %h, expected I %h", rx_data, expect_i);
             rx_err = rx_err + 1;
           end
@@ -144,12 +149,12 @@ module tb_shell2;
           2: begin hts[31:0] = rx_data; hs = 3; end
           3: begin hts[63:32] = rx_data; hs = 4; hk = 0; end
           default: begin
-            // burst samples are {16'hB000 + b, idx}; the first one of each burst marks it
-            if (rx_data[31:16] == 16'hB000 + bursts && rx_data[15:0] == 0 && !in_burst && bursts < 2) begin
+            // burst samples are {16'hB000 + 16 b, 16 idx}; the first one of each burst marks it
+            if (rx_data[31:16] == 16'hB000 + 16 * bursts && rx_data[15:0] == 0 && !in_burst && bursts < 2) begin
               burst_ts[bursts] = hts + hk;
               in_burst = 1;
             end
-            if (in_burst && rx_data[31:16] != 16'hB000 + bursts) begin
+            if (in_burst && rx_data[31:16] != 16'hB000 + 16 * bursts) begin
               in_burst = 0; bursts = bursts + 1;
             end
             hk = hk + 1; hleft = hleft - 1;
@@ -180,7 +185,7 @@ module tb_shell2;
       frame[1] = b;
       frame[2] = t[31:0];
       frame[3] = t[63:32];
-      for (k = 0; k < 100; k = k + 1) frame[4 + k] = {16'hB000 + b, k[15:0]};
+      for (k = 0; k < 100; k = k + 1) frame[4 + k] = {16'hB000 + 16 * b[11:0], k[11:0], 4'd0};
       frame_len = 104;
       frame_pos = 0;
     end

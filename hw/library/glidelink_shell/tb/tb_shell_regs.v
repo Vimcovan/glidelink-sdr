@@ -90,7 +90,7 @@ module tb_shell_regs;
     repeat (10) @(posedge aclk);
 
     expect(16'h000, 32'h474C4B53);
-    expect(16'h004, 32'h00010400);
+    expect(16'h004, 32'h00010500);
     expect(16'h008, 32'h01020201);
     axi_write(16'h00C, 32'hDEADBEEF);
     expect(16'h00C, 32'hDEADBEEF);

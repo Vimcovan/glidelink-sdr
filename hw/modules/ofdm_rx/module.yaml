@@ -1,0 +1,39 @@
+# GlideLink user module description (docs/design.md 5.3)
+id: ofdm_rx
+name: OFDM receiver (DeepJSCC-Q link)
+top: glidelink_ofdm_rx
+source: competition design Vimcovan/glidelink-fpga @ 8367bee, src/hw/rx/rtl/phy (RTL unchanged)
+id_value: 0x4F465258          # "OFRX"
+version: 1.0.0
+clock_mhz: 100
+uses: [phy_common]
+ip:
+  - ip/fft.xci
+  - ip/xcorr_cplx_block.xci
+  - ip/cordic_block.xci
+  - ip/cordic_sin_cos.xci
+  - ip/dds_freq_correct.xci
+  - ip/div_block.xci
+ip_files:
+  xcorr_cplx_block: {Coefficient_File: ip/ltf_cplx_bo8.coe}
+parameters:
+  NSYM: 683
+  FRAME_SYMS: 32768
+data:
+  input: "20 MSPS samples {Q, I}, 16-bit full scale (RF RX streamer); packets ignored"
+  output: "equalised soft symbols {Q, I}, 12-bit Q10 sign-extended; 32768 per frame, tlast on the last"
+registers:
+  - {name: ID, offset: 0x000, access: ro}
+  - {name: VERSION, offset: 0x004, access: ro}
+  - name: CONTROL
+    offset: 0x008
+    access: rw
+    default: 1
+    fields:
+      - {name: enable, bits: 0, doc: "0 drops the input"}
+      - {name: soft_reset, bits: 1, doc: "self-clearing"}
+  - {name: STATUS, offset: 0x00C, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: FRAMES_IN, offset: 0x010, access: ro, doc: "frames received into the frame buffer"}
+  - {name: DROPPED, offset: 0x014, access: ro, doc: "frames dropped, frame buffer full"}
+  - {name: FRAMES_OUT, offset: 0x018, access: ro}
+  - {name: SAMPLES, offset: 0x01C, access: ro}

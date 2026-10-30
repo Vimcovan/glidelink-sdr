@@ -8,6 +8,11 @@
 // The input is sent with random gaps, the output taken with random back-pressure.
 // Each input packet carries tuser = {8'hC3 ^ p[7:0], 64'(p)} on its first beat
 // (p = packet number); the output must keep it on the first beat of the same packet.
+// Capture mode (CAPTURE defined, for modules checked by a script instead of a
+// vector file, e.g. ofdm_tx): every output beat goes to <dir>/captured.hex as
+// "word last flags" (flags = tuser[71:64] of the packet's first beat), and the
+// run ends when the output has been quiet for CAPTURE_QUIET cycles after the input,
+// or after CAPTURE_PACKETS packets if that is defined (modules with their own source).
 
 `timescale 1ns/100ps
 `include "tb_cfg.vh"
@@ -15,6 +20,9 @@
 module tb_module;
 
   localparam MAXN = 1 << 17;
+`ifndef CAPTURE_QUIET
+  `define CAPTURE_QUIET 200000
+`endif
 
   reg         clk = 1'b0, rstn = 1'b0;
   always #2.5 clk = !clk;                   // 200 MHz
@@ -80,12 +88,14 @@ module tb_module;
       if (r == 2) begin in_w[n_in] = d; in_l[n_in] = l; n_in = n_in + 1; end
     end
     $fclose(fd);
+`ifndef CAPTURE
     fd = $fopen({`VEC, "/out.hex"}, "r");
     while (!$feof(fd)) begin
       r = $fscanf(fd, "%h %d\n", d, l);
       if (r == 2) begin out_w[n_out] = d; out_l[n_out] = l; n_out = n_out + 1; end
     end
     $fclose(fd);
+`endif
 
     repeat (10) @(posedge clk);
     rstn <= 1'b1;
@@ -121,6 +131,35 @@ module tb_module;
     end
   end
 
+`ifdef CAPTURE
+  // output: random back-pressure, record
+  integer cap_fd, quiet = 0;
+  reg [7:0] cap_flags = 8'd0;
+  initial cap_fd = $fopen({`VEC, "/captured.hex"}, "w");
+  always @(posedge clk) begin
+    m_ready <= ($random % 3) != 0;
+    quiet = quiet + 1;
+    if (m_valid && m_ready) begin
+      if (first_out) cap_flags = m_user[71:64];
+      $fwrite(cap_fd, "%h %0d %h\n", m_data, m_last, cap_flags);
+      got = got + 1;
+      first_out = m_last;
+      if (m_last) pkt_out = pkt_out + 1;
+      quiet = 0;
+    end
+`ifdef CAPTURE_PACKETS
+    if (pkt_out >= `CAPTURE_PACKETS) quiet = `CAPTURE_QUIET;
+    if (rstn && quiet >= `CAPTURE_QUIET) begin
+`else
+    if (rstn && sent >= n_in && n_in > 0 && quiet >= `CAPTURE_QUIET) begin
+`endif
+      $fclose(cap_fd);
+      $display("%0d beats in %0d packets captured", got, pkt_out);
+      $display("PASS (captured; check with the module's script)");
+      $finish;
+    end
+  end
+`else
   // output: random back-pressure, compare
   always @(posedge clk) begin
     m_ready <= ($random % 3) != 0;
@@ -145,12 +184,15 @@ module tb_module;
     end
   end
 
+`endif
+
   initial begin
     #(5.0 * 20 * MAXN);
     $display("FAIL: timeout, %0d of %0d beats out", got, n_out);
     $finish;
   end
 
+`ifndef CAPTURE
   always @(posedge clk)
     if (rstn && got == n_out && n_out > 0) begin
       repeat (50) @(posedge clk);
@@ -159,5 +201,7 @@ module tb_module;
       if (errors == 0) $display("PASS"); else $display("FAIL");
       $finish;
     end
+
+`endif
 
 endmodule

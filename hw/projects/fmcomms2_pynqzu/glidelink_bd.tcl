@@ -69,9 +69,23 @@ ad_connect tdd_sync_i util_ad9361_tdd_sync/sync_in
 # GlideLink shell
 
 add_files -norecurse [glob $::glidelink_hw_dir/library/glidelink_shell/*.v]
-# user modules in the slots (docs/phase3_modules.md) and their register interface
 add_files -norecurse [glob $::glidelink_hw_dir/library/glidelink_module/*.v]
-add_files -norecurse [glob $::glidelink_hw_dir/modules/*/*.v]
+# the image's slots (docs/phase4_plan.md G7): generated slot wiring, module RTL and IP
+set glidelink_gen [file normalize [file join [pwd] gen_$::glidelink_image]]
+# Vivado puts its own Python (without PyYAML) first on PATH: GLIDELINK_PYTHON, else the
+# Windows launcher "py -3", else python3
+if {[info exists ::env(GLIDELINK_PYTHON)]} {
+  set glidelink_python [list $::env(GLIDELINK_PYTHON)]
+} elseif {[auto_execok py] ne ""} {
+  set glidelink_python [list py -3]
+} else {
+  set glidelink_python [list python3]
+}
+exec {*}$glidelink_python $::glidelink_hw_dir/scripts/gen_image.py $::glidelink_hw_dir/images/$::glidelink_image.yaml $glidelink_gen
+add_files -norecurse [list $glidelink_gen/glidelink_slots.v $glidelink_gen/glidelink_image.vh]
+set_property file_type {Verilog Header} [get_files $glidelink_gen/glidelink_image.vh]
+set_property include_dirs [list $glidelink_gen] [current_fileset]
+source $glidelink_gen/image_sources.tcl
 update_compile_order -fileset sources_1
 
 create_bd_cell -type module -reference glidelink_shell shell
@@ -93,6 +107,7 @@ ad_connect shell/dac_dunf axi_ad9361/dac_dunf
 
 ad_connect sys_200m_clk shell/clk
 ad_connect sys_200m_resetn shell/rstn
+ad_connect sys_250m_clk shell/clk_250
 
 # host port 0: RX DMA (FIFO write interface -> memory). Not the AXI4-Stream
 # source: with it the Linux axi-dmac driver never enabled the channel (RX

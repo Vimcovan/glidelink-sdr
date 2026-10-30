@@ -8,3 +8,6 @@
 /dfx_runtime.txt
 /mem_init_sys.txt
 /system_top.xsa
+/fmcomms2_pynqzu_*
+/gen_*/
+/*.stdout

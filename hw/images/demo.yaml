@@ -1,0 +1,7 @@
+# GlideLink PL image (docs/phase4_plan.md G7): the modules in the slots.
+# clock: 200 (processing clock, default), 250 or 100 MHz; params: RTL parameters.
+name: demo
+slots:
+  - {module: passthrough}         # slot 0
+  - {module: nco}                 # slot 1
+  - {module: fir, params: {TAPS: 32}}

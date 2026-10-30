@@ -1,12 +1,15 @@
 // ***************************************************************************
 // GlideLink shell: synchronous FIFO, first-word fall-through
+// RAM_STYLE: "block" (BRAM), "ultra" (URAM: one clock, read latency 1, no
+// initial contents needed), or "distributed" (LUTRAM)
 // ***************************************************************************
 
 `timescale 1ns/100ps
 
 module glidelink_fifo #(
   parameter WIDTH = 32,
-  parameter ADDR_WIDTH = 10
+  parameter ADDR_WIDTH = 10,
+  parameter RAM_STYLE = "block"
 ) (
   input                       clk,
   input                       rst,
@@ -21,7 +24,7 @@ module glidelink_fifo #(
 
   localparam DEPTH = 1 << ADDR_WIDTH;
 
-  (* ram_style = "block" *) reg [WIDTH-1:0] mem [0:DEPTH-1];
+  (* ram_style = RAM_STYLE *) reg [WIDTH-1:0] mem [0:DEPTH-1];
   reg  [ADDR_WIDTH:0] wr_ptr = 0, rd_ptr = 0;
   reg  [WIDTH-1:0]    out_data = 0;
   reg                 out_valid = 1'b0;

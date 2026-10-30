@@ -48,3 +48,11 @@ if systemctl is-active -q iiod; then
 	systemctl restart iiod
 	echo "iiod restarted"
 fi
+
+# The RF TX data always comes from the shell (through axi_ad9361's DMA data
+# input), never from its DDS: select it on the TX channels (DAC channel register
+# 0x18, value 2). The driver selects it only while a host TX buffer is open, so a
+# module streaming to the RF on its own would otherwise send the DDS tone.
+for ch in 0x418 0x458; do
+	iio_reg cf-ad9361-dds-core-lpc $ch 2 >/dev/null
+done

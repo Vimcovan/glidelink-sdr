@@ -5,6 +5,8 @@
 // models (vectors_chain/out.hex). Then the sender stops in the middle of a
 // transfer, PORT_RESET flushes host port 1 and both slots (their registers
 // are kept), and the same input must give the same output again from the start.
+// Run with -Image demo (slots on the processing clock) and -Image test_clocks
+// (NCO at 250 MHz, FIR at 100 MHz: clock-crossing slots).
 
 `timescale 1ns/100ps
 
@@ -12,8 +14,9 @@ module tb_shell4;
 
   localparam N = 8000;
 
-  reg         aclk = 0, l_clk = 0, clk = 0;
+  reg         aclk = 0, l_clk = 0, clk = 0, clk250 = 0;
   always #5    aclk = ~aclk;
+  always #2    clk250 = ~clk250;
   always #2.03 l_clk = ~l_clk;
   always #2.5  clk = ~clk;
   reg         aresetn = 0, rstn = 0, l_rst = 1;
@@ -46,7 +49,7 @@ module tb_shell4;
     .s_axi_rvalid(rvalid), .s_axi_rready(rready), .s_axi_rresp(), .s_axi_rdata(rdata),
     .l_clk(l_clk), .l_rst(l_rst), .adc_valid_i0(adc_valid), .adc_data_i0(16'd0), .adc_data_q0(16'd0),
     .adc_dovf(), .dac_valid_i0(dac_valid), .dac_data_i0(), .dac_data_q0(), .dac_dunf(),
-    .ctrl_out(8'd0), .clk(clk), .rstn(rstn),
+    .ctrl_out(8'd0), .clk(clk), .rstn(rstn), .clk_250(clk250),
     .host0_rx_valid(), .host0_rx_xfer_req(1'b1), .host0_rx_overflow(1'b0), .host0_rx_data(),
     .host0_tx_valid(1'b0), .host0_tx_ready(), .host0_tx_data(32'd0), .host0_tx_last(1'b0),
     .host1_rx_valid(rx_valid), .host1_rx_xfer_req(rx_req), .host1_rx_overflow(1'b0),

@@ -1,30 +1,78 @@
-# Bit-exact simulation of a user module against its reference model's vectors:
-#   .\run_module_sim.ps1 <module dir> <top module> [vector dir] [vivado bin dir]
+# Simulation of a user module with the generic testbench (tb_module.v):
+#   .\run_module_sim.ps1 <module dir> <top module> [-Vectors <dir>] [-Capture] [-Bin <vivado bin dir>]
 #   e.g. .\run_module_sim.ps1 ..\..\..\modules\nco glidelink_nco
-# Compiles the module library (glidelink_module), every .v in the module dir and tb_module.v.
+# Sources are the module's as the image generator sees them (hw/scripts/gen_image.py: its .v /
+# .sv / .mem files and those of the libraries it uses), the module register interface library,
+# and the simulation files of its Xilinx IP (exported once into the work directory by
+# ip_sim_export.tcl). Without -Capture the output is compared with <vectors>/out.hex; with it,
+# the output is written to <vectors>/captured.hex for the module's own checker.
 param(
   [Parameter(Mandatory = $true)][string]$ModuleDir,
   [Parameter(Mandatory = $true)][string]$Top,
   [string]$Vectors = "",
+  [switch]$Capture,
+  [int]$Packets = 0,                        # capture mode: stop after this many output packets
   [string]$Bin = "D:\AMDDesignTools\2025.2\Vivado\bin"
 )
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $mod = (Resolve-Path $ModuleDir).Path
+$name = Split-Path -Leaf $mod
 if ($Vectors -eq "") { $Vectors = Join-Path $mod "tb\vectors" }
 $vec = (Resolve-Path $Vectors).Path.Replace([char]92, [char]47)
 $work = Join-Path $here "work\$Top"
 New-Item -ItemType Directory -Force $work | Out-Null
 Push-Location $work
 try {
-  "``define DUT $Top`n``define VEC `"$vec`"`n" | Set-Content -Encoding ascii tb_cfg.vh
-  $src = @(Get-ChildItem (Join-Path $here "..\*.v") | ForEach-Object { $_.FullName })
-  $src += @(Get-ChildItem (Join-Path $mod "*.v") | ForEach-Object { $_.FullName })
-  & "$Bin\xvlog.bat" --nolog -i $work $src (Join-Path $here "tb_module.v") | Out-Null
+  $cfg = "``define DUT $Top`n``define VEC `"$vec`"`n"
+  if ($Capture) { $cfg += "``define CAPTURE`n" }
+  if ($Packets -gt 0) { $cfg += "``define CAPTURE_PACKETS $Packets`n" }
+  $cfg | Set-Content -Encoding ascii tb_cfg.vh
+
+  # the module's sources and IP, as the image generator lists them
+  $py = @"
+import json, sys
+sys.path.insert(0, r'$here\..\..\..\scripts')
+import gen_image
+i = gen_image.module_info('$name')
+print(json.dumps({'rtl': i['rtl'], 'ip': gen_image.patch_ips(i, r'$work\ip_xci')}))
+"@
+  $info = (& python -c $py) | ConvertFrom-Json
+  $v = @(Get-ChildItem (Join-Path $here "..\*.v") | ForEach-Object { $_.FullName })
+  $v += @($info.rtl | Where-Object { $_ -like "*.v" })
+  $sv = @($info.rtl | Where-Object { $_ -like "*.sv" })
+  foreach ($m in @($info.rtl | Where-Object { $_ -like "*.mem" })) { Copy-Item -Force $m . }
+
+  $libs = @("-L", "xpm")
+  if ($info.ip.Count -gt 0) {
+    $ipdir = Join-Path $work "ip_sim"
+    if (-not (Test-Path (Join-Path $ipdir "export"))) {
+      & "$Bin\vivado.bat" -mode batch -nojournal -nolog -source (Join-Path $here "ip_sim_export.tcl") -tclargs $ipdir @($info.ip) | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "IP export failed" }
+    }
+    # coefficient / init files the IP models read at elaboration, from the run directory
+    foreach ($f in Get-ChildItem -Recurse (Join-Path $ipdir "ip") -Include *.mif, *.coe) { Copy-Item -Force $f.FullName . }
+    foreach ($prj in Get-ChildItem -Recurse (Join-Path $ipdir "export") -Include vhdl.prj, vlog.prj) {
+      $tool = if ($prj.Name -eq "vhdl.prj") { "xvhdl.bat" } else { "xvlog.bat" }
+      & "$Bin\$tool" --nolog -prj $prj.FullName | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "$tool $($prj.FullName) failed" }
+      $opt = Get-Content (Join-Path $prj.DirectoryName "elab.opt") -Raw
+      foreach ($m in [regex]::Matches($opt, "-L (\S+)")) { $libs += @("-L", $m.Groups[1].Value) }
+    }
+  }
+
+  & "$Bin\xvlog.bat" --nolog -i $work $v (Join-Path $here "tb_module.v") | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "xvlog failed" }
-  & "$Bin\xelab.bat" --nolog --debug off tb_module -s tb_module | Out-Null
+  if ($sv.Count -gt 0) {
+    & "$Bin\xvlog.bat" --nolog -sv $sv | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "xvlog -sv failed" }
+  }
+  & "$Bin\xvlog.bat" --nolog (Join-Path (Split-Path $Bin) "data\verilog\src\glbl.v") | Out-Null
+  # --debug typical: with --debug off the xfft model (FFT IP) of ofdm_rx stops on a spurious
+  # internal assertion ("add_1 must be in range") right after reset
+  & "$Bin\xelab.bat" --nolog --debug typical --relax $libs tb_module glbl -s tb_module | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "xelab failed" }
-  & "$Bin\xsim.bat" --nolog tb_module -R | Select-String -Pattern "PASS|FAIL|ERROR|Fatal|module ID|compared"
+  & "$Bin\xsim.bat" --nolog tb_module -R | Select-String -Pattern "PASS|FAIL|ERROR|Fatal|module ID|compared|captured"
 } finally {
   Pop-Location
 }

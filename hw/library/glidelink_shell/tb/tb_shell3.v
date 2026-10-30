@@ -24,7 +24,12 @@ module tb_shell3;
   end
   wire [15:0] dac_i, dac_q;
   reg  [15:0] adc_i = 0, adc_q = 0;
-  always @(posedge l_clk) if (dac_valid) begin adc_i <= dac_i; adc_q <= dac_q; end
+  // AD9361 digital loopback: the DAC's 12 MSBs come back as the 12-bit ADC sample
+  // (the RX streamer shifts it back up), so test patterns use bits 15..4 only
+  always @(posedge l_clk) if (dac_valid) begin
+    adc_i <= {{4{dac_i[15]}}, dac_i[15:4]};
+    adc_q <= {{4{dac_q[15]}}, dac_q[15:4]};
+  end
 
   reg         awvalid = 0, wvalid = 0, bready = 0, arvalid = 0, rready = 0;
   reg  [15:0] awaddr = 0, araddr = 0;
@@ -89,7 +94,7 @@ module tb_shell3;
       if (!tx_valid[p] || tx_ready[p]) begin
         if (run[p] && ($random & 3) != 0) begin
           tx_valid[p] <= 1;
-          tx_data[p*32 +: 32] <= {~n_tx[p][15:0] ^ (p ? 16'h8000 : 16'h0), n_tx[p][15:0]};
+          tx_data[p*32 +: 32] <= {~n_tx[p][11:0] ^ (p ? 12'h800 : 12'h0), 4'd0, n_tx[p][11:0], 4'd0};
           tx_last[p] <= (n_tx[p] % 1000) == 999;
           n_tx[p] = n_tx[p] + 1;
         end else begin
@@ -109,12 +114,12 @@ module tb_shell3;
     for (p = 0; p < 2; p = p + 1)
       if (rx_valid[p] && !pause[p]) begin
         w = rx_data[p*32 +: 32];
-        if (!locked[p] && w[15:0] != 0 && w[31:16] == (~w[15:0] ^ (p ? 16'h8000 : 16'h0))) begin
+        if (!locked[p] && w[15:4] != 0 && w == {~w[15:4] ^ (p ? 12'h800 : 12'h0), 4'd0, w[15:4], 4'd0}) begin
           locked[p] = 1;
-          expect_i[p] = w[15:0];
+          expect_i[p] = w[15:4];
         end
         if (locked[p]) begin
-          if (w !== {~expect_i[p] ^ (p ? 16'h8000 : 16'h0), expect_i[p]}) begin
+          if (w !== {~expect_i[p][11:0] ^ (p ? 12'h800 : 12'h0), 4'd0, expect_i[p][11:0], 4'd0}) begin
             if (rx_err[p] < 5) $display("ERROR: host %0d RX %h, expected I %h", p, w, expect_i[p]);
             rx_err[p] = rx_err[p] + 1;
           end

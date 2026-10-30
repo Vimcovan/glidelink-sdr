@@ -1,4 +1,5 @@
-// Testbench for glidelink_rx_stream: samples I = sample index, Q = ~I. The
+// Testbench for glidelink_rx_stream: samples I = sample index, Q = ~I (12 bits;
+// the streamer passes them shifted left by 4). The
 // sink applies random back-pressure with long stalls so that packets get
 // dropped. Checks: packet length, contiguous samples inside a packet,
 // timestamp = index of the first sample, gaps are whole packets, the dropped
@@ -59,8 +60,8 @@ module tb_rx_stream;
     if (tvalid && tready) begin
       if (n_in_pkt == 0) begin
         first_idx = tuser[63:0];
-        if (tdata[15:0] !== first_idx[15:0]) begin
-          $display("ERROR: first sample %0d, timestamp %0d", tdata[15:0], first_idx);
+        if (tdata[15:0] !== {first_idx[11:0], 4'd0}) begin
+          $display("ERROR: first sample %0d, timestamp %0d", tdata[15:4], first_idx);
           errors = errors + 1;
         end
         if (packets > 0) begin
@@ -74,9 +75,9 @@ module tb_rx_stream;
           end
           dropped_pkts = dropped_pkts + (first_idx - prev_end - 1) / PKT;
         end
-        expect_i = tdata[15:0];
+        expect_i = tdata[15:4];
       end
-      if (tdata[15:0] !== expect_i || tdata[31:16] !== ~expect_i) begin
+      if (tdata[15:0] !== {expect_i[11:0], 4'd0} || tdata[31:16] !== {~expect_i[11:0], 4'd0}) begin
         $display("ERROR: sample %0d of packet %0d is %h, expected I %h", n_in_pkt, packets, tdata, expect_i);
         errors = errors + 1;
       end

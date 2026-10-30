@@ -1,11 +1,12 @@
 // ***************************************************************************
-// GlideLink shell (docs/phase1_shell.md; slots 1 / 2: docs/phase3_modules.md)
+// GlideLink shell (docs/phase1_shell.md; slots: docs/phase3_modules.md, docs/phase4_plan.md)
 //
 //   sources: 0 RF RX (RX streamer), 1 host port 0 TX, 2 slot 0 out, 3 host port 1 TX,
-//            4 slot 1 out, 5 slot 2 out
+//            3 + k slot k out (k >= 1)
 //   sinks:   0 RF TX (TX streamer), 1 host port 0 RX, 2 slot 0 in, 3 host port 1 RX,
-//            4 slot 1 in, 5 slot 2 in
-//   slots:   0 passthrough, 1 NCO mixer (hw/modules/nco), 2 FIR (hw/modules/fir)
+//            3 + k slot k in (k >= 1)
+//   slots:   as the image says (hw/images/*.yaml, generated glidelink_slots.v and
+//            glidelink_image.vh by hw/scripts/gen_image.py)
 //
 // The stream switch connects them (routes from the registers; reset routes
 // RF RX -> host 0 RX and host 0 TX -> RF TX). Host port 0 carries 16-byte
@@ -28,6 +29,7 @@
 // ***************************************************************************
 
 `timescale 1ns/100ps
+`include "glidelink_image.vh"
 
 module glidelink_shell (
   // registers (CPU clock); the attributes tie the s_axi interface to its
@@ -71,9 +73,10 @@ module glidelink_shell (
   output            dac_dunf,
   input      [7:0]  ctrl_out,
 
-  // processing clock
+  // processing clock; the other clocks a slot may run on
   input             clk,
   input             rstn,
+  input             clk_250,
 
   // host port 0 (processing clock). RX goes to the FIFO write interface of
   // axi_dmac (it cannot hold data off): a word is written when the DMA has a
@@ -99,22 +102,36 @@ module glidelink_shell (
   input             host1_tx_last
 );
 
-  localparam N_SRC = 6, N_SNK = 6, N_SLOTS = 3;
+  localparam N_SLOTS = `GL_N_SLOTS;
+  localparam N_SRC = N_SLOTS + 3, N_SNK = N_SLOTS + 3;
+  localparam PRST_W = N_SLOTS + 4;        // PORT_RESET bits
+
+  // switch port of slot k, PORT_RESET bit of slot k
+  function integer slot_port(input integer k); slot_port = k == 0 ? 2 : 3 + k; endfunction
+  function integer slot_prst(input integer k); slot_prst = k == 0 ? 2 : 4 + k; endfunction
 
   wire        rst = !rstn;
   wire [63:0] time_now;
   wire [15:0] rx_pkt_len;
   wire        rx_enable, tx_late_drop, host0_rx_hdr, host0_tx_hdr, host1_rx_hdr, host1_tx_hdr;
   wire [31:0] ovf_gray, unf_gray, late_gray, herr_gray, herr1_gray;
+  wire  [7:0] tx_dbg_l, tx_dbg_s;
+  wire [63:0] tx_dbg_time;
   reg  [31:0] dma_ovf = 32'd0, dma_ovf_gray = 32'd0, dma1_ovf = 32'd0, dma1_ovf_gray = 32'd0;
   wire [N_SNK*4-1:0] route;
-  wire  [6:0] port_reset;                 // CPU clock: host 0 RX, host 0 TX, slot 0, host 1 RX, host 1 TX, slot 1, slot 2
-  (* ASYNC_REG = "TRUE" *) reg [6:0] prst_m1 = 7'd0, prst_s = 7'd0;
+  wire [PRST_W-1:0] port_reset;           // CPU clock: host 0 RX, host 0 TX, slot 0, host 1 RX, host 1 TX, slot 1..
+  (* ASYNC_REG = "TRUE" *) reg [PRST_W-1:0] prst_m1 = 0, prst_s = 0;
   wire        rx_flush = prst_s[0];
   wire        tx_flush = prst_s[1];
   wire        rx1_flush = prst_s[3];
   wire        tx1_flush = prst_s[4];
-  wire  [2:0] slot_rst = {prst_s[6:5], prst_s[2]};
+  wire [N_SLOTS-1:0] slot_rst;
+  genvar g;
+  generate
+    for (g = 0; g < N_SLOTS; g = g + 1) begin : g_slot_rst
+      assign slot_rst[g] = prst_s[slot_prst(g)];
+    end
+  endgenerate
   always @(posedge clk) begin
     prst_m1 <= port_reset;
     prst_s <= prst_m1;
@@ -144,8 +161,8 @@ module glidelink_shell (
     .m_araddr(r_araddr), .m_arvalid(r_arvalid), .m_arready(r_arready),
     .m_rvalid(r_rvalid), .m_rready(r_rready), .m_rdata(r_rdata));
 
-  glidelink_shell_regs #(.HOST_RX(8'd2), .HOST_TX(8'd2), .SLOTS(N_SLOTS), .N_SNK(N_SNK),
-                         .ROUTE_RESET({4'hF, 4'hF, 4'hF, 4'hF, 4'd0, 4'd1})) i_regs (
+  glidelink_shell_regs #(.HOST_RX(8'd2), .HOST_TX(8'd2), .SLOTS(N_SLOTS), .N_SNK(N_SNK), .PRST_W(PRST_W),
+                         .ROUTE_RESET({{(N_SNK - 2){4'hF}}, 4'd0, 4'd1})) i_regs (
     .s_axi_aclk(s_axi_aclk), .s_axi_aresetn(s_axi_aresetn),
     .s_axi_awvalid(r_awvalid[0]), .s_axi_awready(r_awready[0]), .s_axi_awaddr(r_awaddr),
     .s_axi_awprot(3'd0), .s_axi_wvalid(r_wvalid[0]), .s_axi_wready(r_wready[0]),
@@ -156,37 +173,13 @@ module glidelink_shell (
     .s_axi_rdata(r_rdata[31:0]),
     .l_clk(l_clk), .adc_valid(adc_valid_i0), .time_now(time_now),
     .ctrl_out(ctrl_out), .rx_overflow_gray(ovf_gray), .tx_underflow_gray(unf_gray),
-    .tx_late_gray(late_gray), .host0_tx_err_gray(herr_gray), .host0_rx_ovf_gray(dma_ovf_gray),
+    .tx_late_gray(late_gray), .tx_dbg_l(tx_dbg_l), .tx_dbg_s(tx_dbg_s), .tx_dbg_time(tx_dbg_time),
+    .host0_tx_err_gray(herr_gray), .host0_rx_ovf_gray(dma_ovf_gray),
     .host1_tx_err_gray(herr1_gray), .host1_rx_ovf_gray(dma1_ovf_gray),
     .rx_pkt_len(rx_pkt_len), .rx_enable(rx_enable), .tx_late_drop(tx_late_drop),
     .host0_rx_hdr(host0_rx_hdr), .host0_tx_hdr(host0_tx_hdr), .host1_rx_hdr(host1_rx_hdr),
     .host1_tx_hdr(host1_tx_hdr), .route(route),
     .port_reset(port_reset));
-
-  // slot k: register bus in the processing clock
-  wire [N_SLOTS-1:0]    sl_awvalid, sl_awready, sl_wvalid, sl_wready, sl_bvalid, sl_bready;
-  wire [N_SLOTS-1:0]    sl_arvalid, sl_arready, sl_rvalid, sl_rready;
-  wire [N_SLOTS*12-1:0] sl_awaddr, sl_araddr;
-  wire [N_SLOTS*32-1:0] sl_wdata, sl_rdata;
-
-  genvar g;
-  generate
-    for (g = 0; g < N_SLOTS; g = g + 1) begin : g_slot_cdc
-      glidelink_axil_cdc i_cdc (
-        .s_clk(s_axi_aclk), .s_rstn(s_axi_aresetn),
-        .s_awvalid(r_awvalid[g + 1]), .s_awready(r_awready[g + 1]), .s_awaddr(r_awaddr[11:0]),
-        .s_wvalid(r_wvalid[g + 1]), .s_wready(r_wready[g + 1]), .s_wdata(r_wdata),
-        .s_bvalid(r_bvalid[g + 1]), .s_bready(r_bready[g + 1]),
-        .s_arvalid(r_arvalid[g + 1]), .s_arready(r_arready[g + 1]), .s_araddr(r_araddr[11:0]),
-        .s_rvalid(r_rvalid[g + 1]), .s_rready(r_rready[g + 1]), .s_rdata(r_rdata[(g + 1) * 32 +: 32]),
-        .m_clk(clk), .m_rstn(rstn),
-        .m_awvalid(sl_awvalid[g]), .m_awready(sl_awready[g]), .m_awaddr(sl_awaddr[g * 12 +: 12]),
-        .m_wvalid(sl_wvalid[g]), .m_wready(sl_wready[g]), .m_wdata(sl_wdata[g * 32 +: 32]),
-        .m_bvalid(sl_bvalid[g]), .m_bready(sl_bready[g]),
-        .m_arvalid(sl_arvalid[g]), .m_arready(sl_arready[g]), .m_araddr(sl_araddr[g * 12 +: 12]),
-        .m_rvalid(sl_rvalid[g]), .m_rready(sl_rready[g]), .m_rdata(sl_rdata[g * 32 +: 32]));
-    end
-  endgenerate
 
   // ---------------------------------------------------------------------------
   // stream ports
@@ -211,67 +204,54 @@ module glidelink_shell (
     .m_valid(src_valid[1]), .m_ready(src_ready[1]), .m_data(src_data[32 +: 32]),
     .m_user(src_user[72 +: 72]), .m_last(src_last[1]), .errors_gray(herr_gray));
 
-  // slots: slot k is switch sink / source 2 for k = 0, 3 + k after that. Each
-  // input goes through a skid buffer, so a module may tie its s_axis_tready to
-  // its m_axis_tready combinationally (AXI4-Stream allows it) without closing
-  // a loop through the switch.
+  // slots (generated per image): each behind a glidelink_slot wrapper, which
+  // isolates the switch from the module (skid buffer or clock-crossing FIFOs)
 
-  localparam [N_SLOTS*8-1:0] SLOT_SINK = {8'd5, 8'd4, 8'd2};
-  wire [N_SLOTS-1:0]     sl_in_valid, sl_in_ready;
-  wire [N_SLOTS*105-1:0] sl_in;              // {last, user, data}
+  wire [N_SLOTS-1:0]     sl_snk_valid, sl_snk_ready, sl_src_valid, sl_src_ready;
+  wire [N_SLOTS*105-1:0] sl_snk_data, sl_src_data;      // {last, user, data}
 
   generate
-    for (g = 0; g < N_SLOTS; g = g + 1) begin : g_slot_in
-      localparam integer J = SLOT_SINK[g * 8 +: 8];
-      glidelink_skid #(.W(105)) i_skid (
-        .clk(clk), .rst(rst || slot_rst[g]),
-        .s_valid(snk_valid[J]), .s_ready(snk_ready[J]),
-        .s_data({snk_last[J], snk_user[J * 72 +: 72], snk_data[J * 32 +: 32]}),
-        .m_valid(sl_in_valid[g]), .m_ready(sl_in_ready[g]), .m_data(sl_in[g * 105 +: 105]));
+    for (g = 0; g < N_SLOTS; g = g + 1) begin : g_slot_ports
+      localparam integer J = slot_port(g);
+      assign sl_snk_valid[g] = snk_valid[J];
+      assign snk_ready[J] = sl_snk_ready[g];
+      assign sl_snk_data[g * 105 +: 105] = {snk_last[J], snk_user[J * 72 +: 72], snk_data[J * 32 +: 32]};
+      assign src_valid[J] = sl_src_valid[g];
+      assign sl_src_ready[g] = src_ready[J];
+      assign {src_last[J], src_user[J * 72 +: 72], src_data[J * 32 +: 32]} = sl_src_data[g * 105 +: 105];
     end
   endgenerate
 
+  glidelink_slots i_slots (
+    .s_axi_aclk(s_axi_aclk), .s_axi_aresetn(s_axi_aresetn),
+    .s_awvalid(r_awvalid[NP-1:1]), .s_awready(r_awready[NP-1:1]), .s_awaddr({N_SLOTS{r_awaddr[11:0]}}),
+    .s_wvalid(r_wvalid[NP-1:1]), .s_wready(r_wready[NP-1:1]), .s_wdata({N_SLOTS{r_wdata}}),
+    .s_bvalid(r_bvalid[NP-1:1]), .s_bready(r_bready[NP-1:1]),
+    .s_arvalid(r_arvalid[NP-1:1]), .s_arready(r_arready[NP-1:1]), .s_araddr({N_SLOTS{r_araddr[11:0]}}),
+    .s_rvalid(r_rvalid[NP-1:1]), .s_rready(r_rready[NP-1:1]), .s_rdata(r_rdata[NP*32-1:32]),
+    .clk(clk), .rstn(rstn), .clk_100(s_axi_aclk), .clk_250(clk_250), .flush(slot_rst),
+    .snk_valid(sl_snk_valid), .snk_ready(sl_snk_ready), .snk_data(sl_snk_data),
+    .src_valid(sl_src_valid), .src_ready(sl_src_ready), .src_data(sl_src_data));
 
-  glidelink_passthrough i_slot0 (
-    .clk(clk), .rstn(rstn), .flush(slot_rst[0]),
-    .s_axil_awvalid(sl_awvalid[0]), .s_axil_awready(sl_awready[0]), .s_axil_awaddr(sl_awaddr[0 +: 12]),
-    .s_axil_wvalid(sl_wvalid[0]), .s_axil_wready(sl_wready[0]), .s_axil_wdata(sl_wdata[0 +: 32]),
-    .s_axil_bvalid(sl_bvalid[0]), .s_axil_bready(sl_bready[0]),
-    .s_axil_arvalid(sl_arvalid[0]), .s_axil_arready(sl_arready[0]), .s_axil_araddr(sl_araddr[0 +: 12]),
-    .s_axil_rvalid(sl_rvalid[0]), .s_axil_rready(sl_rready[0]), .s_axil_rdata(sl_rdata[0 +: 32]),
-    .s_axis_tvalid(sl_in_valid[0]), .s_axis_tready(sl_in_ready[0]), .s_axis_tdata(sl_in[0 * 105 +: 32]),
-    .s_axis_tuser(sl_in[0 * 105 + 32 +: 72]), .s_axis_tlast(sl_in[0 * 105 + 104]),
-    .m_axis_tvalid(src_valid[2]), .m_axis_tready(src_ready[2]), .m_axis_tdata(src_data[64 +: 32]),
-    .m_axis_tuser(src_user[144 +: 72]), .m_axis_tlast(src_last[2]));
-
-  glidelink_nco i_slot1 (
-    .clk(clk), .rstn(rstn), .flush(slot_rst[1]),
-    .s_axil_awvalid(sl_awvalid[1]), .s_axil_awready(sl_awready[1]), .s_axil_awaddr(sl_awaddr[12 +: 12]),
-    .s_axil_wvalid(sl_wvalid[1]), .s_axil_wready(sl_wready[1]), .s_axil_wdata(sl_wdata[32 +: 32]),
-    .s_axil_bvalid(sl_bvalid[1]), .s_axil_bready(sl_bready[1]),
-    .s_axil_arvalid(sl_arvalid[1]), .s_axil_arready(sl_arready[1]), .s_axil_araddr(sl_araddr[12 +: 12]),
-    .s_axil_rvalid(sl_rvalid[1]), .s_axil_rready(sl_rready[1]), .s_axil_rdata(sl_rdata[32 +: 32]),
-    .s_axis_tvalid(sl_in_valid[1]), .s_axis_tready(sl_in_ready[1]), .s_axis_tdata(sl_in[1 * 105 +: 32]),
-    .s_axis_tuser(sl_in[1 * 105 + 32 +: 72]), .s_axis_tlast(sl_in[1 * 105 + 104]),
-    .m_axis_tvalid(src_valid[4]), .m_axis_tready(src_ready[4]), .m_axis_tdata(src_data[128 +: 32]),
-    .m_axis_tuser(src_user[288 +: 72]), .m_axis_tlast(src_last[4]));
-
-  glidelink_fir #(.TAPS(32)) i_slot2 (
-    .clk(clk), .rstn(rstn), .flush(slot_rst[2]),
-    .s_axil_awvalid(sl_awvalid[2]), .s_axil_awready(sl_awready[2]), .s_axil_awaddr(sl_awaddr[24 +: 12]),
-    .s_axil_wvalid(sl_wvalid[2]), .s_axil_wready(sl_wready[2]), .s_axil_wdata(sl_wdata[64 +: 32]),
-    .s_axil_bvalid(sl_bvalid[2]), .s_axil_bready(sl_bready[2]),
-    .s_axil_arvalid(sl_arvalid[2]), .s_axil_arready(sl_arready[2]), .s_axil_araddr(sl_araddr[24 +: 12]),
-    .s_axil_rvalid(sl_rvalid[2]), .s_axil_rready(sl_rready[2]), .s_axil_rdata(sl_rdata[64 +: 32]),
-    .s_axis_tvalid(sl_in_valid[2]), .s_axis_tready(sl_in_ready[2]), .s_axis_tdata(sl_in[2 * 105 +: 32]),
-    .s_axis_tuser(sl_in[2 * 105 + 32 +: 72]), .s_axis_tlast(sl_in[2 * 105 + 104]),
-    .m_axis_tvalid(src_valid[5]), .m_axis_tready(src_ready[5]), .m_axis_tdata(src_data[160 +: 32]),
-    .m_axis_tuser(src_user[360 +: 72]), .m_axis_tlast(src_last[5]));
+  // switch aborts: a flushed port drops its connections
+  wire [N_SNK-1:0] abort_snk;
+  wire [N_SRC-1:0] abort_src;
+  assign abort_snk[0] = tx_flush;
+  assign abort_snk[1] = rx_flush;
+  assign abort_snk[3] = rx1_flush;
+  assign abort_src[0] = 1'b0;
+  assign abort_src[1] = tx_flush;
+  assign abort_src[3] = tx1_flush;
+  generate
+    for (g = 0; g < N_SLOTS; g = g + 1) begin : g_slot_abort
+      assign abort_snk[slot_port(g)] = slot_rst[g];
+      assign abort_src[slot_port(g)] = slot_rst[g];
+    end
+  endgenerate
 
   glidelink_switch #(.N_SRC(N_SRC), .N_SNK(N_SNK)) i_switch (
     .clk(clk), .rst(rst), .route(route),
-    .abort_snk({slot_rst[2:1], rx1_flush, slot_rst[0], rx_flush, tx_flush}),
-    .abort_src({slot_rst[2:1], tx1_flush, slot_rst[0], tx_flush, 1'b0}),
+    .abort_snk(abort_snk), .abort_src(abort_src),
     .s_valid(src_valid), .s_ready(src_ready), .s_data(src_data), .s_user(src_user), .s_last(src_last),
     .m_valid(snk_valid), .m_ready(snk_ready), .m_data(snk_data), .m_user(snk_user), .m_last(snk_last));
 
@@ -280,7 +260,8 @@ module glidelink_shell (
     .s_axis_tlast(snk_last[0]), .s_axis_tvalid(snk_valid[0]), .s_axis_tready(snk_ready[0]),
     .l_clk(l_clk), .l_rst(l_rst), .dac_valid(dac_valid_i0), .dac_data_i(dac_data_i0),
     .dac_data_q(dac_data_q0), .time_now(time_now), .late_drop(tx_late_drop),
-    .underflow_gray(unf_gray), .late_gray(late_gray), .dac_dunf(dac_dunf));
+    .underflow_gray(unf_gray), .late_gray(late_gray), .dac_dunf(dac_dunf),
+    .dbg_l(tx_dbg_l), .dbg_s(tx_dbg_s), .dbg_start_time(tx_dbg_time));
 
   reg         rx_phase = 1'b0;
   wire        rx_valid;
