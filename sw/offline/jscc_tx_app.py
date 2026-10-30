@@ -12,10 +12,14 @@ TCP control (one line per command, one line back), for the PC tools (sw/offline/
     time              -> "time <board time>"                      clock offset estimate
     src <path>        -> "ok"                                     switch the source
     att <dB>          -> "att <dB set>"                           TX attenuation (AD9361 TX1)
+    state             -> JSON: source, attenuation, frames sent, frame rate
+    ref               -> "ref <index> <bytes>" + the last frame sent (256x256x3 uint8), for display
+                         and PSNR on the PC (gr-glidelink jscc_rx_view)
     events            -> then one line per frame sent: "frame <n> <t_start> <t_end> <src id> <index>"
                          (index: image number in a directory source, in sorted file order)
 """
 import argparse
+import json
 import os
 import socket
 import threading
@@ -77,6 +81,7 @@ class App:
     def __init__(self, a):
         self.a, self.src, self.lock = a, Source(a.src), threading.Lock()
         self.listeners = []
+        self.frames, self.last = 0, (0, bytes(IMG * IMG * 3))
         self.dev = SoapySDR.Device(a.args)
         self.tx = self.dev.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, [0],
                                        {"port": "1", "headers": "false", "bufferLength": str(WORDS)})
@@ -104,6 +109,17 @@ class App:
                     f.write(f"att {-float(phy.attr('out_voltage0_hardwaregain').split()[0]):.2f}\n")
                 except Exception as e:                  # noqa: BLE001  (reported to the client)
                     f.write(f"error {e}\n")
+            elif cmd == "state":
+                from glidelinkd import IioDev
+                att = -float(IioDev("ad9361-phy").attr("out_voltage0_hardwaregain").split()[0])
+                f.write(json.dumps({"src": self.src.spec, "att_db": att, "frames": self.frames,
+                                    "fps": self.a.fps}) + "\n")
+            elif cmd == "ref":
+                with self.lock:
+                    idx, data = self.last
+                f.write(f"ref {idx} {len(data)}\n")
+                f.flush()
+                conn.sendall(data)
             elif cmd == "events":
                 with self.lock:
                     self.listeners.append(f)
@@ -129,7 +145,8 @@ class App:
             with self.lock:
                 src = self.src
             img, idx = src.next()
-            words = np.frombuffer(img.tobytes(), "<u4")
+            data = img.tobytes()
+            words = np.frombuffer(data, "<u4")
             now = time.time()
             if now < t_next:
                 time.sleep(t_next - now)
@@ -144,6 +161,7 @@ class App:
             t1 = time.time()
             t_next = max(t_next + period, t1 - period)  # keep the pace, do not burst after a stall
             with self.lock:
+                self.last, self.frames = (idx, data), self.frames + 1
                 for f in list(self.listeners):
                     try:
                         f.write(f"frame {n} {t0:.6f} {t1:.6f} {src.id} {idx}\n")

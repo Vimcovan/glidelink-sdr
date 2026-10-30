@@ -1,0 +1,43 @@
+id: glidelink_jscc_rx_view
+label: JSCC RX View
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: rx_host
+    label: RX board
+    dtype: string
+    default: '192.168.3.1'
+-   id: tx_host
+    label: TX board ('' = no TX frame)
+    dtype: string
+    default: '192.168.4.1'
+-   id: interval
+    label: Status interval (s)
+    dtype: real
+    default: '1.0'
+-   id: zoom
+    label: Zoom
+    dtype: int
+    default: '2'
+-   id: gui_hint
+    label: GUI Hint
+    dtype: gui_hint
+    hide: part
+
+templates:
+    imports: |-
+        from gnuradio import glidelink
+        from PyQt5 import Qt
+    make: |-
+        <%
+            win = 'self._%s_win'%id
+        %>\
+        glidelink.jscc_rx_view(${rx_host}, ${tx_host}, ${interval}, ${zoom})
+        ${win} = self.${id}.widget
+        ${gui_hint() % win}
+
+documentation: |-
+    The link as a user sees it: the frame the TX application sent last (its "ref" command) next to the latest image decoded by the RX board (sw/offline/jscc_rx_app.py, image stream port 7021), and a status line: decoded images per second, PSNR of the decoded image against the TX frame (meaningful for a still image source), RX gain and RSSI, PHY frames and AGC watchdog resets of glidelinkd.
+
+file_format: 1

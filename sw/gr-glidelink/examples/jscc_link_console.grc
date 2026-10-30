@@ -1,0 +1,187 @@
+options:
+  parameters:
+    author: GlideLink
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    description: 'Link console of the offline DeepJSCC-Q system: TX source and attenuation, TX frame and decoded image, link status, receiver constellation and EVM'
+    generate_options: qt_gui
+    id: jscc_link_console
+    output_language: python
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    title: GlideLink DeepJSCC-Q link console
+    window_size: (1400,1000)
+  states:
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: tx_host
+  id: parameter
+  parameters:
+    comment: TX board (glidelinkd@tx and jscc-tx-app running)
+    label: TX board
+    short_id: t
+    type: str
+    value: 192.168.4.1
+  states:
+    coordinate: [240, 8]
+    rotation: 0
+    state: enabled
+- name: rx_host
+  id: parameter
+  parameters:
+    comment: RX board (glidelinkd@rx and jscc-rx-app running)
+    label: RX board
+    short_id: r
+    type: str
+    value: 192.168.3.1
+  states:
+    coordinate: [400, 8]
+    rotation: 0
+    state: enabled
+- name: media
+  id: variable
+  parameters:
+    comment: media directory on the TX board
+    value: '''/home/xilinx/claude/tx/media'''
+  states:
+    coordinate: [560, 8]
+    rotation: 0
+    state: enabled
+- name: att
+  id: variable_qtgui_range
+  parameters:
+    comment: AD9361 TX attenuation of the TX board (the configuration's default is 4 dB)
+    gui_hint: 0,0,1,1
+    label: TX attenuation (dB)
+    min_len: '300'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0'
+    step: '0.5'
+    stop: '70'
+    value: '4'
+    widget: counter_slider
+  states:
+    coordinate: [240, 100]
+    rotation: 0
+    state: enabled
+- name: src
+  id: variable_qtgui_chooser
+  parameters:
+    comment: what the TX board encodes and sends
+    gui_hint: 0,1,1,1
+    label: Source
+    labels: '[''Lemons (div2k_0802)'', ''div2k_0801'', ''div2k_0803'', ''div2k_0830'', ''div2k_0843'', ''All presets (cycled)'', ''Video: colorful'', ''Video: kodim23'']'
+    num_opts: '0'
+    options: '[media + ''/presets/div2k_0802.png'', media + ''/presets/div2k_0801.png'', media + ''/presets/div2k_0803.png'', media + ''/presets/div2k_0830.png'', media + ''/presets/div2k_0843.png'', media + ''/presets'', media + ''/colorful_256.mp4'', media + ''/kodim23_256.mp4'']'
+    type: string
+    value: media + '/presets/div2k_0802.png'
+    widget: combo_box
+  states:
+    coordinate: [440, 100]
+    rotation: 0
+    state: enabled
+- name: tx
+  id: glidelink_jscc_tx_control
+  parameters:
+    att: att
+    comment: TX application (port 7020)
+    host: tx_host
+    src: src
+  states:
+    coordinate: [240, 240]
+    rotation: 0
+    state: enabled
+- name: view
+  id: glidelink_jscc_rx_view
+  parameters:
+    comment: TX frame | decoded image, status line
+    gui_hint: 1,0,1,2
+    interval: '1.0'
+    rx_host: rx_host
+    tx_host: tx_host
+    zoom: '2'
+  states:
+    coordinate: [440, 240]
+    rotation: 0
+    state: enabled
+- name: syms
+  id: glidelink_jscc_rx_symbols
+  parameters:
+    comment: one frame of the receiver's soft symbols every 2 s (about one image per 2 s is not decoded)
+    interval: '2.0'
+    rx_host: rx_host
+  states:
+    coordinate: [240, 380]
+    rotation: 0
+    state: enabled
+- name: const
+  id: qtgui_const_sink_x
+  parameters:
+    alpha1: '0.5'
+    autoscale: 'False'
+    axislabels: 'True'
+    color1: '"blue"'
+    comment: ''
+    grid: 'True'
+    gui_hint: 2,0,1,1
+    label1: ''
+    legend: 'False'
+    marker1: '0'
+    name: '"Receiver constellation (64-QAM)"'
+    nconnections: '1'
+    size: '8192'
+    style1: '0'
+    tr_chan: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_slope: qtgui.TRIG_SLOPE_POS
+    tr_tag: '""'
+    type: complex
+    update_time: '0.5'
+    width1: '1'
+    xmax: '1.5'
+    xmin: '-1.5'
+    ymax: '1.5'
+    ymin: '-1.5'
+  states:
+    coordinate: [480, 380]
+    rotation: 0
+    state: enabled
+- name: evm
+  id: variable_function_probe
+  parameters:
+    block_id: syms
+    comment: EVM of the last symbol frame
+    function_args: ''
+    function_name: evm
+    poll_rate: '1'
+    value: '0'
+  states:
+    coordinate: [240, 480]
+    rotation: 0
+    state: enabled
+- name: evm_label
+  id: variable_qtgui_label
+  parameters:
+    comment: ''
+    formatter: 'lambda x: ''%.2f dB'' % x'
+    gui_hint: 2,1,1,1
+    label: Receiver EVM (decision directed)
+    type: real
+    value: evm
+  states:
+    coordinate: [480, 520]
+    rotation: 0
+    state: enabled
+
+connections:
+- [syms, '0', const, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2

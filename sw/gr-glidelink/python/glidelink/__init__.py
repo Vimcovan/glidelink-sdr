@@ -23,3 +23,4 @@ except ModuleNotFoundError:
 from .control import control
 from .host_port import host_source, host_sink
 from .modules import nco_model, nco, fir_model, fir
+from .jscc import jscc_tx_control, jscc_rx_view, jscc_rx_symbols

@@ -19,6 +19,7 @@ Control (TCP --ctrl, one line per command):
                          and the decoder flushed (it counts its own frames; a partial frame would
                          shift every later image)
     rf                -> "rf <RX gain dB> <RSSI dB> <ofdm_rx FRAMES_IN>"
+    status            -> JSON: {"app": this application's statistics, "daemon": glidelinkd's status}
 Statistics go to /run/glidelink/rx_app.json every second.
 """
 import argparse
@@ -88,6 +89,12 @@ class App:
                 ok = req[1].wait(10.0)
                 data = b"".join(req[2]) if ok else b""
                 f.write(f"symbols {len(req[2]) if ok else 0} {len(data)}\n".encode() + data)
+            elif cmd == "status":
+                try:
+                    daemon = json.load(open("/run/glidelink/status.json"))
+                except (OSError, ValueError):
+                    daemon = None
+                f.write((json.dumps({"app": self.stats, "daemon": daemon}) + "\n").encode())
             elif cmd == "rf":
                 g = self.phy.attr("in_voltage0_hardwaregain").split()[0]
                 r = self.phy.attr("in_voltage0_rssi").split()[0]

@@ -6,3 +6,6 @@
 - glidelink_nco
 - glidelink_fir_model
 - glidelink_fir
+- glidelink_jscc_tx_control
+- glidelink_jscc_rx_view
+- glidelink_jscc_rx_symbols

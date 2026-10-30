@@ -1,0 +1,30 @@
+id: glidelink_jscc_tx_control
+label: JSCC TX Control
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: host
+    label: TX board
+    dtype: string
+    default: '192.168.4.1'
+-   id: src
+    label: Source (path on the TX board)
+    dtype: string
+    default: '/home/xilinx/claude/tx/media/presets/div2k_0802.png'
+-   id: att
+    label: TX attenuation (dB)
+    dtype: real
+    default: '4'
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.jscc_tx_control(${host}, 7020, ${src}, ${att})
+    callbacks:
+    - set_src(${src})
+    - set_att(${att})
+
+documentation: |-
+    The TX application of the offline DeepJSCC-Q system (sw/offline/jscc_tx_app.py, port 7020): the image source (a still image, a directory of images or a video on the TX board) and the AD9361 TX attenuation (0 to 89.75 dB; the configuration's default is 4 dB). Both can be variables of QT GUI widgets: they change while the flowgraph runs.
+
+file_format: 1

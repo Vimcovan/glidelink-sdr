@@ -1,0 +1,29 @@
+id: glidelink_jscc_rx_symbols
+label: JSCC RX Symbols
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: rx_host
+    label: RX board
+    dtype: string
+    default: '192.168.3.1'
+-   id: interval
+    label: Interval (s)
+    dtype: real
+    default: '2.0'
+
+outputs:
+-   domain: stream
+    dtype: complex
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.jscc_rx_symbols(${rx_host}, ${interval})
+
+documentation: |-
+    The OFDM receiver's soft symbols (sw/offline/jscc_rx_app.py "symbols"): one frame of 32768 per interval, scaled so the outer 64-QAM level is 1, for a constellation sink. evm() returns the decision-directed EVM of the last frame in dB (a Function Probe can show it).
+
+    Each capture routes the receiver's output to host port 1 for one frame, so about one image per interval is not decoded.
+
+file_format: 1
