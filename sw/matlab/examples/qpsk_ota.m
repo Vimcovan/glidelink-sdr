@@ -28,6 +28,7 @@ x = x(n + 1:2 * n);                              % one period of the steady stat
 x = 0.7 * x / max(abs(x));
 
 %% boards
+clear tx rx                                      % connections of an earlier run
 tx = glidelink.Radio(txHost);
 rx = glidelink.Radio(rxHost);
 tx.config(Rate=fs, Freq=fc, Bandwidth=2 * fs, TxAtten=txAtten);
@@ -37,6 +38,7 @@ pause(0.5);
 y = rx.rx(fs);                                   % 1 s of samples
 s = rx.config();                                 % settings as read back
 tx.txStop();
+clear tx rx                                      % close the connections to the bridges
 
 %% receiver
 y = y - mean(y);

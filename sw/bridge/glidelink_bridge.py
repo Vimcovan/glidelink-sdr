@@ -5,7 +5,8 @@ MATLAB (sw/matlab/+glidelink) or any client with sockets and JSON.
     python3 glidelink_bridge.py [--port 7030]
 
 Runs on the board, instead of the offline services (glidelinkd@*, which own the routes): stop them
-first, or use the glidelink-bridge service (Conflicts=). One client at a time.
+first, or use the glidelink-bridge service (Conflicts=). Several clients may be connected; their
+commands run one at a time.
 
 Protocol: each request is one line of JSON, each reply one line of JSON; sample data follow a
 line that gives their length in "bytes". Samples are CS16 (int16 I, Q interleaved, 12-bit full
@@ -51,7 +52,8 @@ class Bridge:
         # the RF through host port 0 in both directions (an offline image routes it elsewhere)
         self.routes({"host0_rx": "rf_rx", "rf_tx": "host0_tx"})
         self.dev = SoapySDR.Device(a.args)
-        self.tx_thread, self.tx_run = None, False
+        self.tx_thread, self.tx_run, self.tx_owner = None, False, None
+        self.lock = threading.Lock()
 
     # ------------------------------------------------------------------ helpers
     def routes(self, routes):
@@ -183,7 +185,7 @@ class Bridge:
         return got[:pos[0]].tobytes()
 
     # ------------------------------------------------------------------ protocol
-    def handle(self, f):
+    def handle(self, f, who):
         def reply(obj, payload=b""):
             if payload:
                 obj["bytes"] = len(payload)
@@ -195,52 +197,63 @@ class Bridge:
                 r = json.loads(line)
                 cmd = r.get("cmd")
                 data = f.read(int(r["bytes"])) if "bytes" in r else b""
-                if cmd == "info":
-                    reply({"ok": True, "driver": "glidelink", "shell": f"{self.shell.reg(0x004):08X}",
-                           **self.settings()})
-                elif cmd == "config":
-                    reply({"ok": True, **self.config(r)})
-                elif cmd == "tx_cyclic":
-                    self.tx_cyclic(data)
-                    reply({"ok": True, "samples": len(data) // 4})
-                elif cmd == "tx_stop":
-                    self.tx_stop()
-                    reply({"ok": True})
-                elif cmd == "rx":
-                    reply({"ok": True}, self.rx(int(r["n"])))
-                elif cmd == "host1":
-                    reply({"ok": True}, self.host1(data, int(r["n_out"])))
-                elif cmd == "route":
-                    self.routes(r["routes"])
-                    reply({"ok": True})
-                elif cmd == "reg":
-                    dev = self.shell if r.get("iface", "FPGA") == "FPGA" else self.phy
-                    if "value" in r:
-                        dev.reg(int(r["addr"]), int(r["value"]))
-                    reply({"ok": True, "value": dev.reg(int(r["addr"]))})
-                else:
-                    reply({"ok": False, "error": f"unknown command {cmd}"})
+                with self.lock:                          # clients take turns on the board
+                    self.command(cmd, r, data, reply, who)
             except Exception as e:                       # noqa: BLE001  (reported to the client)
                 reply({"ok": False, "error": str(e)})
+
+    def command(self, cmd, r, data, reply, who):
+        if cmd == "info":
+            reply({"ok": True, "driver": "glidelink", "shell": f"{self.shell.reg(0x004):08X}",
+                   **self.settings()})
+        elif cmd == "config":
+            reply({"ok": True, **self.config(r)})
+        elif cmd == "tx_cyclic":
+            self.tx_cyclic(data)
+            self.tx_owner = who
+            reply({"ok": True, "samples": len(data) // 4})
+        elif cmd == "tx_stop":
+            self.tx_stop()
+            reply({"ok": True})
+        elif cmd == "rx":
+            reply({"ok": True}, self.rx(int(r["n"])))
+        elif cmd == "host1":
+            reply({"ok": True}, self.host1(data, int(r["n_out"])))
+        elif cmd == "route":
+            self.routes(r["routes"])
+            reply({"ok": True})
+        elif cmd == "reg":
+            dev = self.shell if r.get("iface", "FPGA") == "FPGA" else self.phy
+            if "value" in r:
+                dev.reg(int(r["addr"]), int(r["value"]))
+            reply({"ok": True, "value": dev.reg(int(r["addr"]))})
+        else:
+            reply({"ok": False, "error": f"unknown command {cmd}"})
+
+    def client(self, c, addr):
+        print(f"client {addr[0]}:{addr[1]}", flush=True)
+        f = c.makefile("rwb")
+        try:
+            self.handle(f, (c, addr))
+        except OSError:
+            pass
+        finally:
+            with self.lock:
+                if self.tx_owner == (c, addr):           # its cyclic TX ends with it
+                    self.tx_stop()
+            c.close()
+            print(f"client {addr[0]}:{addr[1]} gone", flush=True)
 
     def serve(self):
         srv = socket.socket()
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind(("", self.a.port))
-        srv.listen(1)
+        srv.listen(8)
         print(f"glidelink bridge on port {self.a.port}", flush=True)
         while True:
             c, addr = srv.accept()
             c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            print(f"client {addr[0]}", flush=True)
-            try:
-                self.handle(c.makefile("rwb"))
-            except OSError:
-                pass
-            finally:
-                self.tx_stop()
-                c.close()
-                print("client gone", flush=True)
+            threading.Thread(target=self.client, args=(c, addr), daemon=True).start()
 
 
 def main():
