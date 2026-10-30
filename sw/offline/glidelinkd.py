@@ -8,7 +8,9 @@ At start, in this order:
   1. overlay: load the image (hw/scripts/load_overlay.sh) unless it is already applied;
   2. AD9361 through the ADI driver (sysfs): FIR file with clock chain and bandwidths, LO
      frequencies, RF bandwidths, RX gain mode / gain, TX attenuation, TX LO power down, then
-     register writes from a file (e.g. the competition's fast-attack AGC block);
+     register writes from a file (e.g. the competition's fast-attack AGC block); finally the DAC
+     data source of both TX channels is set to the shell (axi_ad9361 0x418 / 0x458 = 2): a rate or
+     FIR change resets the interface core, which puts it back to its DDS default;
   3. module registers (CONTROL etc.), then the stream switch routes; a sink whose route changes is
      flushed (PORT_RESET), as gr-glidelink's control block does.
 Then, every poll interval:
@@ -192,6 +194,9 @@ class Daemon:
                         self.agc_cfg = v                # the last 0x0FA write: the gain control mode
                     n += 1
             log(f"AD9361: {n} register writes from {c['registers']}")
+        dds = IioDev("cf-ad9361-dds-core-lpc")
+        for ch in (0x418, 0x458):                       # DAC data select: 2 = DMA / shell input
+            dds.reg(ch, 2)
         rates = p.attr("rx_path_rates")
         log(f"AD9361: {rates}; RX LO {p.attr('out_altvoltage0_RX_LO_frequency')}, gain mode "
             f"{p.attr('in_voltage0_gain_control_mode')}, TX gain {p.attr('out_voltage0_hardwaregain')}")
@@ -241,7 +246,7 @@ class Daemon:
                 vals = {n: self.shell.reg(SLOT_BASE(s) + o) for n, (s, o) in counters.items()}
                 if wd:
                     n = self.shell.reg(SLOT_BASE(int(wd["slot"])) + int(wd["counter"]))
-                    g = self.phy.reg(0x0B0) & 0x7F                 # RX1 full-table gain index
+                    g = self.phy.reg(0x109) & 0x7F                 # RX1 gain index (full table)
                     hist.append((now, n))
                     while len(hist) > 1 and now - hist[1][0] >= float(wd.get("stall_s", 0.5)):
                         hist.popleft()
