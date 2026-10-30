@@ -1,0 +1,63 @@
+netdev, hif: do not hang or spin a core when firmware recovery starts
+
+When the firmware stops answering (5 timed-out config packets, seen after
+SDIO CRC errors), debug_thread sets wait_for_recovery and closes the
+interface. If a scan is running, wilc_mac_close() -> wilc_handle_disconnect()
+-> handle_scan_done(SCAN_EVENT_ABORTED) sends WID_ABORT_RUNNING_SCAN, and
+wilc_send_config_pkt() sleeps until wait_for_recovery is cleared, which only
+wilc_mac_open() after the close does: the recovery never ends and WiFi stays
+down. wl->close is already set, so wlan0-tx, woken by the next packet,
+loops on schedule() waiting for a kthread_stop() that never comes and keeps
+a core at 100%.
+
+Skip the abort command during recovery (the chip is reset anyway), and let
+both threads sleep instead of spin while they wait for kthread_stop().
+
+--- a/hif.c
++++ b/hif.c
+@@ -180,6 +180,12 @@
+ 			hif_drv->hif_state = HOST_IF_IDLE;
+ 		else
+ 			hif_drv->hif_state = HOST_IF_CONNECTED;
++	} else if (evt == SCAN_EVENT_ABORTED && wait_for_recovery) {
++		/* Recovery is closing the interface to reset the chip:
++		 * wilc_send_config_pkt() would wait for the recovery to end
++		 * and never return
++		 */
++		PRINT_INFO(vif->ndev, GENERIC_DBG, "Drop running scan\n");
+ 	} else if (evt == SCAN_EVENT_ABORTED) {
+ 		PRINT_INFO(vif->ndev, GENERIC_DBG, "Abort running scan\n");
+ 		abort_running_scan = 1;
+--- a/netdev.c
++++ b/netdev.c
+@@ -84,8 +84,12 @@
+ 		ret = wait_for_completion_interruptible_timeout(
+ 			&wl->debug_thread_started, msecs_to_jiffies(6000));
+ 		if (ret > 0) {
+-			while (!kthread_should_stop())
++			set_current_state(TASK_INTERRUPTIBLE);
++			while (!kthread_should_stop()) {
+ 				schedule();
++				set_current_state(TASK_INTERRUPTIBLE);
++			}
++			__set_current_state(TASK_RUNNING);
+ 			pr_info("Exit debug thread\n");
+ 			return 0;
+ 		}
+@@ -354,8 +358,15 @@
+ 		if (wl->close) {
+ 			complete(&wl->txq_thread_started);
+ 
+-			while (!kthread_should_stop())
++			/* Sleep until kthread_stop(): spinning on schedule()
++			 * keeps a core busy until the close path gets there
++			 */
++			set_current_state(TASK_INTERRUPTIBLE);
++			while (!kthread_should_stop()) {
+ 				schedule();
++				set_current_state(TASK_INTERRUPTIBLE);
++			}
++			__set_current_state(TASK_RUNNING);
+ 			PRINT_INFO(ndev, TX_DBG, "TX thread stopped\n");
+ 			break;
+ 		}

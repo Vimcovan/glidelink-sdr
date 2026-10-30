@@ -33,7 +33,14 @@ AD9361、AXI ADC / DDS、AXI DMAC 与 IIO DMA 缓冲（均编进内核），以�
 
 - `wilc/compat.h`：定义 `struct ieee80211_radiotap_header_fixed`。该结构是 6.6 稳定版后期才加入的，`adi-6.6.0` 没有；
 - `wilc/0001-sdio-allow-host-without-runtime-pm.patch`：`adi-6.6.0` 的 SD 主机驱动没有启用运行时电源管理，
-  `pm_runtime_get_sync()` 返回 `-EACCES`，驱动把它当作错误导致探测失败（`-EIO`）。此时主机一直上电，忽略该返回值即可。
+  `pm_runtime_get_sync()` 返回 `-EACCES`，驱动把它当作错误导致探测失败（`-EIO`）。此时主机一直上电，忽略该返回值即可；
+- `wilc/0002-recovery-no-hang-no-spin.patch`：修正固件恢复流程的自锁。SDIO 偶发 CRC 错误（`err(-84)`）后固件不再应答，
+  连续 5 个配置包超时，`debug_thread` 置 `wait_for_recovery` 并关闭网口重启芯片。若此时正在扫描，关闭网口时
+  `handle_scan_done()` 要发"中止扫描"配置包，而 `wilc_send_config_pkt()` 要等 `wait_for_recovery` 清零，
+  清零又在关闭之后的重新打开里，于是恢复永远停住，WiFi 断到重启为止。`wl->close` 已置位，`wlan0-tx` 被下一个发送包唤醒后
+  在 `while (!kthread_should_stop()) schedule();` 里空转占满一核；芯片若还活着，它的中断也不再被应答，
+  变成 SDIO 中断风暴由 kworker 占满一核。补丁让恢复期间跳过中止扫描命令（芯片随后被重启），
+  并把两处等待 `kthread_stop()` 的循环改为睡眠等待。
 
 固件沿用板上的 `/lib/firmware/mchp/wilc3000_wifi_firmware.bin`；`/etc/modules` 中已有 `wilc-sdio`，开机自动加载。
 没有该驱动时 wlan0 不出现，`network.target` 要等约 90 s 超时，开机明显变慢。
