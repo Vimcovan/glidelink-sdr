@@ -1,0 +1,34 @@
+# Receiver board, offline (docs/phase4_plan.md 4.6): image rx (slot 1 ofdm_rx @100 MHz,
+# slot 2 jscc_dec @250 MHz); RF -> OFDM receiver -> decoder -> host port 1 (jscc_rx_app.py).
+# AD9361 as in the competition RX (sw/offline/competition_profile.py): 20 MSPS FIRs, 915 MHz,
+# 15 MHz baseband, fast-attack AGC with the competition's register block (lock level -14 dBFS),
+# own TX off (attenuation 89.75 dB, TX LO powered down).
+overlay:
+  bit: ../ovl/glidelink_rx.bit
+  dtbo: ../ovl/glidelink_rx.dtbo
+  loader: ../load_overlay.sh
+ad9361:
+  fir: ../profiles/jscc_20msps.ftr
+  rx_lo_hz: 915e6
+  tx_lo_hz: 915e6
+  rx_rf_bandwidth_hz: 30e6
+  tx_rf_bandwidth_hz: 30e6
+  rx_gain_mode: fast_attack
+  tx_attenuation_db: 89.75
+  tx_lo_powerdown: true
+  registers: ../profiles/jscc_agc_rx.txt
+modules:
+  slot1: {0x008: 0x3}           # ofdm_rx: soft reset + enable
+  slot2: {0x008: 0x3}           # jscc_dec: soft reset + enable
+routes:
+  host0_rx: none                # the RF RX source feeds one sink: the receiver
+  slot1_in: rf_rx
+  slot2_in: slot1_out
+  host1_rx: slot2_out
+watchdog: {slot: 1, counter: 0x010, min_rate: 5, stall_s: 0.5, holdoff_s: 3}
+status:
+  path: /run/glidelink/status.json
+  counters:
+    phy_frames: [1, 0x010]      # ofdm_rx FRAMES_IN
+    phy_dropped: [1, 0x014]     # ofdm_rx DROPPED (frame buffer full)
+    images: [2, 0x010]          # jscc_dec FRAMES_OUT

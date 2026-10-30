@@ -75,6 +75,7 @@ struct Stream {
 	uint32_t timedFlag = 0;         // TX: header flag of a timed packet (by shell version)
 	bool flagsShared = false;       // shell >= 1.3: one set of flags in both directions
 	bool pktEob = false;            // RX: the current packet ends a burst
+	bool pktCut = false;            // RX: the current part was cut off, the packet goes on
 	bool rxShifted = false;         // RX, host port 0: samples arrive shifted left by 4 (shell >= 1.5)
 };
 
@@ -82,6 +83,7 @@ const uint32_t HDR_MAGIC = 0xA5;
 // header flags = tuser flags (hw/library/glidelink_shell/glidelink_shell.v); before
 // shell 1.3 the TX side had its own bit 0 = timed
 const uint32_t FLAG_DROPPED = 1u << 0, FLAG_EOB = 1u << 1, FLAG_TIMED = 1u << 2, FLAG_TIMED_OLD = 1u << 0;
+const uint32_t FLAG_CUT = 1u << 7;            // header only: a packet longer than one part goes on
 const unsigned SHELL_VERSION_HEADERS = 0x00010100, SHELL_VERSION_FLAGS = 0x00010300;
 // from 1.5 the RX streamer passes the 12-bit ADC sample shifted left by 4 (16-bit
 // full scale in the PL, as the DAC side); CS16 stays the 12-bit sample
@@ -749,6 +751,7 @@ private:
 					s->pktTime = (uint64_t(s->hdr[3]) << 32) | s->hdr[2];
 					uint32_t pf = s->hdr[0] >> 16;
 					s->pktEob = s->flagsShared && (pf & FLAG_EOB);
+					s->pktCut = pf & FLAG_CUT;
 					// before 1.3 a packet from a host TX port had bit 0 = timed
 					bool dropped = (pf & FLAG_DROPPED) && (s->flagsShared || s->port == 0);
 					if (dropped && !s->firstPacket)
@@ -769,7 +772,9 @@ private:
 			s->pos += n;
 			if (s->pktLeft == 0) {
 				s->hdrPos = 0;
-				if (s->pktEob)
+				if (s->pktCut)
+					flags |= SOAPY_SDR_MORE_FRAGMENTS;   // the stream packet continues in the next part
+				else if (s->pktEob)
 					flags |= SOAPY_SDR_END_BURST;
 			} else {
 				flags |= SOAPY_SDR_MORE_FRAGMENTS;

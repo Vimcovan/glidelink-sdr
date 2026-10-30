@@ -1,0 +1,28 @@
+# Transmitter board, offline (docs/phase4_plan.md 4.6): image tx (slot 1 jscc_enc @250 MHz,
+# slot 2 ofdm_tx @100 MHz); host port 1 (jscc_tx_app.py) -> encoder -> OFDM transmitter -> RF.
+# AD9361 as in the competition TX: 20 MSPS FIRs, 915 MHz, 15 MHz baseband, TX attenuation 4 dB.
+overlay:
+  bit: ../ovl/glidelink_tx.bit
+  dtbo: ../ovl/glidelink_tx.dtbo
+  loader: ../load_overlay.sh
+ad9361:
+  fir: ../profiles/jscc_20msps.ftr
+  rx_lo_hz: 915e6
+  tx_lo_hz: 915e6
+  rx_rf_bandwidth_hz: 30e6
+  tx_rf_bandwidth_hz: 30e6
+  tx_attenuation_db: 4
+modules:
+  slot1: {0x008: 0x3}           # jscc_enc: soft reset + enable
+  slot2: {0x008: 0x3}           # ofdm_tx: soft reset + enable (data from the encoder, not PRBS)
+routes:
+  host0_rx: none
+  slot1_in: host1_tx
+  slot2_in: slot1_out
+  rf_tx: slot2_out
+status:
+  path: /run/glidelink/status.json
+  counters:
+    images: [1, 0x010]          # jscc_enc FRAMES_OUT
+    phy_frames: [2, 0x014]      # ofdm_tx FRAMES_OUT
+    tlast_errors: [2, 0x018]    # ofdm_tx TLAST_ERR
