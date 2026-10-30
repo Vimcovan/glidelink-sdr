@@ -1,0 +1,7 @@
+# Transmitter board image (phase 4): DeepJSCC-Q encoder (250 MHz) and the OFDM
+# transmitter (100 MHz); images come in on host port 1, the samples go to the RF.
+name: tx
+slots:
+  - {module: passthrough}
+  - {module: jscc_enc, clock: 250}
+  - {module: ofdm_tx, clock: 100}

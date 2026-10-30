@@ -186,8 +186,11 @@ module tb_module;
 
 `endif
 
+`ifndef TIMEOUT_NS
+  `define TIMEOUT_NS (5.0 * 20 * MAXN)
+`endif
   initial begin
-    #(5.0 * 20 * MAXN);
+    #(`TIMEOUT_NS);
     $display("FAIL: timeout, %0d of %0d beats out", got, n_out);
     $finish;
   end

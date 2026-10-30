@@ -1,0 +1,25 @@
+# GlideLink user module description (docs/design.md 5.3)
+id: jscc_enc
+name: DeepJSCC-Q encoder
+top: glidelink_jscc_enc
+source: competition design Vimcovan/glidelink-fpga @ 8367bee, src/hw/tx/rtl/network (generated RTL and weights, unchanged)
+id_value: 0x4A454E43          # "JENC"
+version: 1.0.0
+clock_mhz: 250                # the layer parallelism was chosen for 30 fps at 250 MHz
+uses: [nn_common]
+data:
+  input: "256x256 RGB uint8, NHWC, four bytes per word (little endian): 49,152 words per image"
+  output: "32,768 64-QAM symbols per image {Q, I}, 12-bit Q10 sign-extended; tlast on the last"
+registers:
+  - {name: ID, offset: 0x000, access: ro}
+  - {name: VERSION, offset: 0x004, access: ro}
+  - name: CONTROL
+    offset: 0x008
+    access: rw
+    default: 1
+    fields:
+      - {name: enable, bits: 0, doc: "0 holds the input off"}
+      - {name: soft_reset, bits: 1, doc: "self-clearing"}
+  - {name: STATUS, offset: 0x00C, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: FRAMES_OUT, offset: 0x010, access: ro}
+  - {name: BYTES_IN, offset: 0x014, access: ro}

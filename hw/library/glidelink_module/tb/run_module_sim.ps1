@@ -12,6 +12,7 @@ param(
   [string]$Vectors = "",
   [switch]$Capture,
   [int]$Packets = 0,                        # capture mode: stop after this many output packets
+  [double]$TimeoutMs = 0,                   # simulated time limit (default 13 ms)
   [string]$Bin = "D:\AMDDesignTools\2025.2\Vivado\bin"
 )
 $ErrorActionPreference = "Stop"
@@ -27,6 +28,7 @@ try {
   $cfg = "``define DUT $Top`n``define VEC `"$vec`"`n"
   if ($Capture) { $cfg += "``define CAPTURE`n" }
   if ($Packets -gt 0) { $cfg += "``define CAPTURE_PACKETS $Packets`n" }
+  if ($TimeoutMs -gt 0) { $cfg += "``define TIMEOUT_NS ($($TimeoutMs * 1e6))`n" }
   $cfg | Set-Content -Encoding ascii tb_cfg.vh
 
   # the module's sources and IP, as the image generator lists them
