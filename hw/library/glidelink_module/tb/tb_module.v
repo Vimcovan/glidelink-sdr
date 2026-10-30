@@ -7,7 +7,9 @@
 //   <dir>/out.hex   expected output beats, same format
 // The input is sent with random gaps, the output taken with random back-pressure.
 // Each input packet carries tuser = {8'hC3 ^ p[7:0], 64'(p)} on its first beat
-// (p = packet number); the output must keep it on the first beat of the same packet.
+// (p = packet number); the output must keep it on the first beat of the same packet,
+// unless NO_TUSER_CHECK is defined (modules whose output packets do not map one to
+// one onto input packets, e.g. jscc_enc: an image in, a symbol frame out).
 // Capture mode (CAPTURE defined, for modules checked by a script instead of a
 // vector file, e.g. ofdm_tx): every output beat goes to <dir>/captured.hex as
 // "word last flags" (flags = tuser[71:64] of the packet's first beat), and the
@@ -173,10 +175,12 @@ module tb_module;
             $display("ERROR: beat %0d: got %h last %b, want %h last %b", got, m_data, m_last, out_w[got], out_l[got]);
           errors = errors + 1;
         end
+`ifndef NO_TUSER_CHECK
         if (first_out && m_user !== {8'hC3 ^ pkt_out[7:0], 32'd0, pkt_out}) begin
           if (errors < 10) $display("ERROR: packet %0d tuser %h", pkt_out, m_user);
           errors = errors + 1;
         end
+`endif
       end
       got = got + 1;
       first_out = m_last;

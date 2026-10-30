@@ -1,0 +1,7 @@
+# Receiver board image (phase 4): the OFDM receiver (100 MHz) and the DeepJSCC-Q decoder
+# (250 MHz); samples come from the RF, the images go out on host port 1.
+name: rx
+slots:
+  - {module: passthrough}
+  - {module: ofdm_rx, clock: 100}
+  - {module: jscc_dec, clock: 250}
