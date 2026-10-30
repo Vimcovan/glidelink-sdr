@@ -1,76 +1,71 @@
-# GlideLink in MATLAB
+# 在 MATLAB 中使用 GlideLink
 
-MATLAB talks to each board through the GlideLink bridge, a fixed service on the board
-(`glidelink-bridge`, TCP port 7030, started at boot). Nothing is installed on the PC besides MATLAB
-(R2025b tested; `tcpclient` is part of MATLAB); the examples use the Communications Toolbox.
+MATLAB 通过板上的桥接服务（`glidelink-bridge`，TCP 端口 7030，开机自动启动）控制每块板子。电脑上除
+MATLAB 外不需要安装任何东西（已在 R2025b 上测试，`tcpclient` 是 MATLAB 自带的）；示例用到通信工具箱。
 
 ```matlab
 addpath('D:/ClaudePrj/glidelink-sdr/sw/matlab')
-run('D:/ClaudePrj/glidelink-sdr/sw/matlab/examples/qpsk_ota.m')     % QPSK between the two boards
+run('D:/ClaudePrj/glidelink-sdr/sw/matlab/examples/qpsk_ota.m')     % 两块板之间的 QPSK
 ```
 
-## Examples (`sw/matlab/examples`, all over the air between the two boards, same bridge)
+## 示例（`sw/matlab/examples`，都在两块板之间空口收发，用同一个桥接服务）
 
-| Script | Scheme | What it shows |
+| 脚本 | 通信体制 | 展示内容 |
 |---|---|---|
-| `qpsk_ota.m` | QPSK, RRC, 1 MSPS | single carrier, continuous; Communications Toolbox synchronisation chain |
-| `fsk_narrowband.m` | 2-FSK, 10 kbaud, 0.6 MSPS | narrowband, constant envelope (PAPR 0 dB), noncoherent detection |
-| `css_chirp.m` | chirp spread spectrum SF7, 125 kHz, 1 MSPS | constant envelope, spread spectrum; spectrogram of the chirps |
-| `wlan_ofdm.m` | 802.11a/g 16-QAM 3/4, 20 MSPS (WLAN Toolbox) | wideband, high PAPR (10 dB), packets with idle time; channel estimate |
-| `timed_bursts.m` | 20 Zadoff-Chu bursts at exact hardware times, 2 MSPS | bursts scheduled ahead; spacing precision (ns), clock offset (ppm) |
-| `agc_modes.m` | the same bursts (14 dB steps) with fixed gain, slow AGC, fast AGC, fast AGC with another lock level | how each gain mode reacts (driver parameters as they are; the fast AGC's parameters are listed in the script) |
-| `run_all.m` | all of the above, one after the other | summary table |
-| `run_agc.m` | every scheme twice: the fixed gain, then the AGC configured for its waveform | summary table with the gain the AD9361 ended up with |
+| `qpsk_ota.m` | QPSK，根升余弦成形，1 MSPS | 单载波、连续发送；通信工具箱的同步链路 |
+| `fsk_narrowband.m` | 2-FSK，10 kBd，0.6 MSPS | 窄带、恒包络（峰均比 0 dB），非相干检测 |
+| `css_chirp.m` | 线性调频扩频 SF7，125 kHz，1 MSPS | 恒包络、扩频；调频信号的时频图 |
+| `wlan_ofdm.m` | 802.11a/g 16-QAM 3/4，20 MSPS（WLAN 工具箱） | 宽带、高峰均比（10 dB）、带空闲间隔的包；信道估计 |
+| `timed_bursts.m` | 20 个 Zadoff-Chu 突发，按硬件时间精确发送，2 MSPS | 提前排定的突发；间隔精度（ns）、时钟偏差（ppm） |
+| `agc_modes.m` | 同一串突发（功率相差 14 dB），分别用固定增益、慢速 AGC、快速 AGC、换一个锁定电平的快速 AGC | 各增益模式的反应（驱动参数保持原样，快速 AGC 的可调参数列在脚本里） |
+| `run_all.m` | 依次运行以上全部 | 汇总表 |
+| `run_agc.m` | 每个体制跑两次：固定增益，以及针对其波形配置的 AGC | 汇总表，含 AD9361 最终的增益 |
 
-On 2026-10-30 `run_all` gave 0 bit errors in every scheme (QPSK 440 kbit, 2-FSK 27 kbit, CSS 768
-symbols, OFDM 60 packets / 480 kbit at SNR 27.6 dB, bursts 20 of 20 with 2 ns spacing spread).
+2026-10-30 `run_all` 各体制均 0 误码（QPSK 440 kbit，2-FSK 27 kbit，CSS 768 个符号，OFDM 60 包 / 480 kbit、
+信噪比 27.6 dB，突发 20 个全收到、间隔离散 2 ns）。
 
-## AGC per waveform
+## 各波形的 AGC 配置
 
-Each scheme script carries an AGC configuration for its waveform (`agcMode`, `agcParams`, with the
-reason for every value in the comments); `gainMode = "agc"` before running the script selects it
-(`run_agc.m` does), otherwise the script uses its fixed gain. `glidelink.agcSetup(r, mode, params)`
-writes the driver parameters, re-initialises the AD9361 and selects the gain mode;
-`glidelink.agcRestore(r, saved)` puts parameters, gain mode and gain back at the end of the script.
-The measurement durations count samples of ClkRF (4 x the sample rate here), and the driver
-shortens a slow-AGC measurement that does not fit twice into the gain update interval.
+每个体制脚本都带有针对其波形的 AGC 配置（`agcMode`、`agcParams`，每个取值的理由写在注释里）。运行脚本前
+设 `gainMode = "agc"` 即启用（`run_agc.m` 就是这样做的），否则使用脚本里的固定增益。
+`glidelink.agcSetup(r, mode, params)` 写入驱动参数、按新参数重新初始化 AD9361 并选择增益模式；
+`glidelink.agcRestore(r, saved)` 在脚本结束时恢复参数、增益模式和增益。
+功率测量时长按 ClkRF 的采样计数（这里是采样率的 4 倍）；慢速 AGC 的测量时长若不能在增益更新间隔内放下
+两次，驱动会自动缩短。
 
-| Script | AGC | Configuration |
+| 脚本 | AGC | 配置 |
 |---|---|---|
-| `qpsk_ota.m` | slow attack | average power -11..-14 dBFS (PAPR about 3.5 dB), 256 us average, update every 5 ms |
-| `fsk_narrowband.m` | slow attack | -6..-8 dBFS (constant envelope), update every 5 ms |
-| `css_chirp.m` | slow attack | -6..-8 dBFS, averaged over the 4.1 ms frame gap, update every 50 ms |
-| `wlan_ofdm.m` | fast attack | as the competition OFDM receiver: lock level -14 dBFS (PAPR 10 dB), gain held after the first packet, no unlock on a stronger signal (the OFDM peaks reach lock level + 10 dB); started once packets are on the air, restarted if the samples clip |
-| `timed_bursts.m` | fast attack | lock level -8 dBFS (constant envelope), unlock in the 10 ms gaps, each burst attacked from maximum gain |
+| `qpsk_ota.m` | 慢速 | 平均功率 −11～−14 dBFS（峰均比约 3.5 dB），平均 256 µs，每 5 ms 更新一次 |
+| `fsk_narrowband.m` | 慢速 | −6～−8 dBFS（恒包络），每 5 ms 更新一次 |
+| `css_chirp.m` | 慢速 | −6～−8 dBFS，平均时长等于 4.1 ms 的帧间空隙，每 50 ms 更新一次 |
+| `wlan_ofdm.m` | 快速 | 同竞赛 OFDM 接收机：锁定电平 −14 dBFS（峰均比 10 dB），第一包锁定后保持，关闭强信号解锁（OFDM 峰值可达锁定电平 +10 dB）；包开始发送后再启动 AGC，采样削顶时重启 |
+| `timed_bursts.m` | 快速 | 锁定电平 −8 dBFS（恒包络），10 ms 间隔内解锁，每个突发从最大增益重新攻击 |
 
-On 2026-10-30 `run_agc` gave 0 errors in all ten runs (OFDM with the AGC: 60 of 60 packets at
-gain 29 dB, SNR 26.9 dB). Over repeated OFDM runs the fast AGC locked about 13 dB too high once
-in six (2 of 60 packets bad); per-packet unlocking (energy lost, then maximum or optimised gain)
-gave 0 to 59 bad packets of 60 from run to run on these boards, so it is not used.
+2026-10-30 `run_agc` 十组全部 0 误码（OFDM 用 AGC 时 60 包全对，增益 29 dB，信噪比 26.9 dB）。
+OFDM 重复运行时，快速 AGC 约每 6 次有 1 次锁得偏高约 13 dB（60 包错 2 包）；每包解锁（能量消失后回到
+最大或优化增益）在这两块板上每次结果差别很大（60 包错 0～59 包），因此不采用。
 
 ## `glidelink.Radio`
 
-| Call | What it does |
+| 调用 | 作用 |
 |---|---|
-| `r = glidelink.Radio("192.168.4.1")` | connect (checks the bridge protocol version) |
-| `s = r.config(Rate=1e6, Freq=915e6, Bandwidth=2e6, RxGain=40, TxAtten=20)` | radio settings, read back; also `RxFreq`, `TxFreq`, `RxGainMode` (`"slow_attack"`, `"fast_attack"`, `"hybrid"`, `"manual"`), `Loopback` (AD9361 digital loopback). Rates 0.52 to 61.44 MSPS (the FIR is designed for the rate) |
-| `r.txCyclic(x)` / `r.txStop()` | repeat a waveform (complex, abs(x) <= 1) on the board, no network load |
-| `t = r.txBurst(x, 0.1)` / `r.txBurst(x, [], t)` | one burst at hardware time now + 0.1 s (or at t, ns), ended as a burst; returns once queued, so many bursts can be scheduled ahead (the bridge sends them in order) |
-| `[y, t] = r.rx(n)` | n contiguous samples (complex, full scale 1), captured on the board, then sent; t = hardware time of the first sample (ns) |
-| `t = r.time()` | hardware time (sample clock), ns |
-| `v = r.attr(name)` / `r.attr(name, value)` | any AD9361 driver attribute: sysfs (`"in_voltage0_rssi"`, ...) or the driver's parameters (`"adi,agc-inner-thresh-high"`, ...; `r.attr("initialize", 1)` re-runs the driver's setup with them; the bridge keeps rate, LOs, bandwidth, gain mode / gain and TX attenuation across it unless their own device-tree parameter was written). Driver parameters stay set until changed again or the board reboots |
-| `r.route(struct("slot0_in", "host1_tx", "host1_rx", "slot0_out"))` | stream switch routes, sink <- source |
-| `w = r.host1(words, m)` | uint32 words to host port 1 (into the routed modules), m words back |
-| `v = r.reg("FPGA", addr)` / `r.reg("FPGA", addr, value)` | shell and module registers (`"AD9361"`: chip registers) |
+| `r = glidelink.Radio("192.168.4.1")` | 连接（检查桥接协议版本） |
+| `s = r.config(Rate=1e6, Freq=915e6, Bandwidth=2e6, RxGain=40, TxAtten=20)` | 射频设置并读回；另有 `RxFreq`、`TxFreq`、`RxGainMode`（`"slow_attack"`、`"fast_attack"`、`"hybrid"`、`"manual"`）、`Loopback`（AD9361 数字环回）。采样率 0.52～61.44 MSPS（按采样率设计 FIR） |
+| `r.txCyclic(x)` / `r.txStop()` | 在板上循环发送一段波形（复数，abs(x) ≤ 1），不占网络 |
+| `t = r.txBurst(x, 0.1)` / `r.txBurst(x, [], t)` | 在硬件时间"现在 + 0.1 s"（或 t，单位 ns）发送一个突发，按突发结束；排队后即返回，可以提前排定多个突发（桥接服务按顺序发送） |
+| `[y, t] = r.rx(n)` | 在板上连续采集 n 个采样（复数，满幅为 1）后发回；t 为第一个采样的硬件时间（ns） |
+| `t = r.time()` | 硬件时间（采样时钟），ns |
+| `v = r.attr(name)` / `r.attr(name, value)` | AD9361 驱动的任意属性：sysfs（`"in_voltage0_rssi"` 等）或驱动参数（`"adi,agc-inner-thresh-high"` 等；`r.attr("initialize", 1)` 按这些参数重新初始化，桥接服务在初始化前后保持采样率、本振、带宽、增益模式 / 增益和发射衰减，客户端改过对应设备树参数的项除外）。驱动参数改动后一直有效，直到再改或板子重启 |
+| `r.route(struct("slot0_in", "host1_tx", "host1_rx", "slot0_out"))` | 流交换路由，接收端 <- 来源 |
+| `w = r.host1(words, m)` | 向主机端口 1（进入已连接的模块）发送 uint32 字，并取回 m 个字 |
+| `v = r.reg("FPGA", addr)` / `r.reg("FPGA", addr, value)` | 外壳和模块寄存器（`"AD9361"`：芯片寄存器） |
 
-Each request takes about 15 ms in MATLAB (tcpclient); scripts that schedule bursts leave that much
-time per burst before the first one. Several MATLAB sessions (or scripts) may be connected to a
-board at once; their commands take turns.
-A cyclic transmission stops when the connection that started it closes (`clear r`).
+MATLAB 中每个请求约 15 ms（tcpclient）；排定突发的脚本在第一个突发之前为每个突发留出这么多时间。
+一块板可以同时连接多个 MATLAB 会话（或脚本），它们的命令轮流执行。
+循环发送在启动它的连接关闭时（`clear r`）停止。
 
-## The board side
+## 板子一侧
 
-The bridge service loads the board's image at boot and owns the routes, so it does not run together
-with the offline DeepJSCC-Q system; switch on the board with `systemctl start glidelinkd@tx` (or `rx`)
-and back with `systemctl start glidelink-bridge` (each stops the other). Installation:
-`sw/bridge/install.sh <image.bit> --enable`.
+桥接服务在开机时加载板子的镜像并管理路由，因此不能与离线 DeepJSCC-Q 系统同时运行：在板上用
+`systemctl start glidelinkd@tx`（或 `rx`）切换到离线系统，用 `systemctl start glidelink-bridge` 切回
+（启动一个会停止另一个）。安装：`sw/bridge/install.sh <image.bit> --enable`。
