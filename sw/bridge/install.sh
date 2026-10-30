@@ -9,6 +9,8 @@ set -e
 image=$(readlink -f "$1")
 [ -f "$image" ] || { echo "usage: install.sh <image.bit> [--enable]"; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
+# the C paths (RX capture, cyclic TX buffer) for rates above 20 MSPS
+gcc -O2 -shared -fPIC -o "$here/libglidelink_fast.so" "$here/glidelink_fast.c" -liio
 install -m 644 "$here/glidelink-bridge.service" /etc/systemd/system/
 echo "GLIDELINK_IMAGE=$image" > /etc/default/glidelink-bridge
 systemctl daemon-reload

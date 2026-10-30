@@ -5,6 +5,7 @@ classdef Radio < handle
     %   r.config(Rate=1e6, Freq=915e6, Bandwidth=1e6, TxAtten=20);
     %   r.txCyclic(x);              % complex column, |x| <= 1: repeated on the board
     %   y = r.rx(1e6);              % 1e6 contiguous samples, complex double, full scale 1
+    %   [y, t, d] = r.rx(1e6);      % t: hardware time (ns) of the first; d: drops (warns if any)
     %   r.txStop();
     %   r.txBurst(x, 0.1);          % one burst 0.1 s from now (hardware time); r.txBurst(x, [], t)
     %                               % at hardware time t (ns); returns once queued
@@ -89,11 +90,24 @@ classdef Radio < handle
             obj.request(struct("cmd", "tx_stop"));
         end
 
-        function [y, t] = rx(obj, n)
+        function [y, t, d] = rx(obj, n)
             %RX n contiguous samples (captured on the board, then sent), complex double; t is the
-            %hardware time of the first sample in ns ([] if unknown).
+            %hardware time of the first sample in ns ([] if unknown). d: struct with Overflows
+            %(gaps), Dropped (samples lost in all) and Drops ([index, lost] rows: lost samples
+            %before sample index + 1); a warning when samples were lost (the capture is then not
+            %contiguous). An older bridge reports no drops (empty fields).
             [rep, data] = obj.request(struct("cmd", "rx", "n", n));
             t = rep.time;
+            d = struct("Overflows", [], "Dropped", [], "Drops", zeros(0, 2));
+            if isfield(rep, "overflows")
+                d.Overflows = rep.overflows;
+                d.Dropped = rep.dropped;
+                d.Drops = reshape(rep.drops, [], 2);
+                if d.Overflows > 0
+                    warning("glidelink:rxDrops", "%s: rx lost %d samples in %d gaps", obj.Host, ...
+                        d.Dropped, d.Overflows);
+                end
+            end
             v = double(typecast(data, "int16")) / 2048;
             y = complex(v(1:2:end), v(2:2:end));
             y = y(:);

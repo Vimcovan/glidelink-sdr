@@ -11,7 +11,7 @@
 | M1 | 接入方式 | 板上运行桥接服务 `glidelink_bridge.py`，MATLAB 用自带的 `tcpclient` 连接；MATLAB 侧提供 `+glidelink` 包 | PC 上只需 MATLAB 本体（本机 R2025b），不装 libiio、Soapy 或 ADI 支持包；桥接服务在板上调用 Soapy，平台的全部功能（定时突发、主机端口 1、路由、寄存器、驱动参数）都能用，语义与 GNU Radio 一侧相同 |
 | M2 | 协议 | TCP，端口 7030；每个请求与应答是一行 JSON（MATLAB 的 `jsonencode` / `jsondecode` 与 Python 的 `json` 都是内置的）；样点块紧跟在 JSON 行之后，长度在 JSON 中给出 | 控制命令可读、易扩展；样点按二进制传输，不经文本转换 |
 | M3 | 样点格式 | 射频端口：CS16（`int16` 交织 I/Q，12 位满量程，与 Soapy 的约定相同），MATLAB 侧换成 `±1` 归一化的复数 `double`；主机端口 1：32 位字原样（`uint32`），也可按 `{Q, I}` 取复数 | 射频样点与 GNU Radio、Soapy 一侧一致；模块数据不一定是射频样点，原样传递 |
-| M4 | TX 方式 | 三种：循环发送（波形一次传到板上，由桥接服务在板上反复写入 DMA，等同 ADI 工具箱的 `EnableCyclicBuffers`）；连续流式发送；定时突发（给定硬件时间，结尾标突发结束） | 算法验证大多是“一段波形反复发”，循环发送不占网络带宽，速率不受 USB 网口约 7 MSPS 的限制 |
+| M4 | TX 方式 | 三种：循环发送（波形一次传到板上，放进 DMA 循环缓冲区由硬件重复，等同 ADI 工具箱的 `EnableCyclicBuffers`；超过 2^23 个采样时由桥接服务反复写入）；连续流式发送；定时突发（给定硬件时间，结尾标突发结束） | 算法验证大多是“一段波形反复发”，循环发送不占网络带宽，速率不受 USB 网口约 7 MSPS 的限制 |
 | M5 | RX 方式 | 两种：一次取 N 个连续样点（桥接服务先在板上读满，再整块传回，保证中间无丢失，长度受板上内存限制）；连续流式接收（尽力而为，报告溢出） | 板上先缓存再传，取回的数据一定连续，与网络速率无关 |
 | M6 | 与脱机服务的关系 | 桥接服务与 `glidelinkd@*` 及其应用互斥（systemd `Conflicts=`）；打开射频时按请求设置路由（默认 RF ↔ 主机端口 0），清理链路上的槽位 | 脱机服务占用射频与路由；桥接服务适用于任何镜像（demo、phy_test、tx、rx） |
 | M7 | MATLAB 包 | `sw/matlab/+glidelink`：`Radio`（射频收发、频点、采样率、带宽、增益与增益模式、驱动参数、硬件时间、定时突发）、`HostPort`（主机端口 1 收发）、`Shell`（路由、寄存器、端口清理）；普通 handle 类，每块板一个连接 | 与 gr-glidelink 的划分一致（控制、主机端口、射频）；先用普通类，Simulink 块与 System object 之后再加 |
@@ -53,7 +53,8 @@ MATLAB 接收端使用 Communications Toolbox 的标准模块：自动增益 →
 
 | 项目 | 结果 |
 |---|---|
-| 桥接服务 | `sw/bridge/glidelink_bridge.py`，systemd 服务 `glidelink-bridge`（开机加载本板镜像后启动，与脱机系统互斥）；协议版本 1，命令覆盖射频设置（任意采样率 0.52–61.44 MSPS，由 libad9361 为该速率设计 FIR）、任意驱动属性、循环 / 定时突发发送、连续取样、硬件时间、主机端口 1、路由、寄存器；多个客户端可同时连接，命令依次执行 |
+| 桥接服务 | `sw/bridge/glidelink_bridge.py`，systemd 服务 `glidelink-bridge`（开机加载本板镜像后启动，与脱机系统互斥）；协议版本 1（之后只增加字段：`protocol_rev` 1 起，`rx` 报告丢失，`tx_cyclic` 报告方式），命令覆盖射频设置（任意采样率 0.52–61.44 MSPS，40 MSPS 及以下由 libad9361 为该速率设计 FIR，以上只用驱动自身的滤波器）、任意驱动属性、循环 / 定时突发发送、连续取样、硬件时间、主机端口 1、路由、寄存器；多个客户端可同时连接，命令依次执行 |
+| 高采样率 | 接收采集与循环发送放在 C 库 `sw/bridge/libglidelink_fast.so`（`glidelink_fast.c`，ctypes 调用，`install.sh` 在板上编译）：接收按包头时间检查连续性并报告每处丢失（位置与采样数）；循环发送用 libiio 循环缓冲区，由 DMA 硬件重复。`sw/tests/bridge_rate.py` 在 20～50 MSPS 下验证循环波形周期（误差 ≤ ±1 个采样）与定时突发间隔（50.000 ms），均无丢失 |
 | MATLAB 包 | `sw/matlab/+glidelink/Radio.m`，只用 MATLAB 自带的 `tcpclient`；连接时检查协议版本；说明见 `sw/matlab/README.md` |
 | Q2 QPSK 空中收发 | `sw/matlab/examples/qpsk_ota.m`：1 MSPS、250 k 符号/s，110 帧 44 万比特误码 0，EVM −23.8 dB；2.5 MSPS 时 292 帧 116.8 万比特误码 0，EVM −27.7 dB；图窗显示频谱、同步前后星座、统计 |
 | 多种通信体制 | 同一个桥接服务、板上不做任何改动，`examples/run_all.m` 依次运行：QPSK（1 MSPS）、2-FSK（窄带恒包络，0.6 MSPS）、线性调频扩频 SF7（1 MSPS）、802.11a/g OFDM 16-QAM（宽带、高 PAPR、按包突发，20 MSPS，WLAN Toolbox）、按硬件时间定时发出的突发（2 MSPS），全部零误码；突发间隔误差标准差 2 ns |

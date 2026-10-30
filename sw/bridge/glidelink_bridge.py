@@ -10,7 +10,7 @@ Started by the glidelink-bridge service (sw/bridge/install.sh). Without an overl
 which own the routes; the service units conflict). Several clients may be connected; their commands
 run one at a time.
 
-Protocol (version PROTOCOL): each request is one line of JSON, each reply one line of JSON with
+Protocol (version PROTOCOL, additions PROTOCOL_REV): each request is one line of JSON, each reply one line of JSON with
 "ok" (and "error" when false); data follow a reply line that gives their length in "bytes", and
 a request line likewise. Samples are CS16 (int16 I, Q interleaved, 12-bit full scale = 2048, as
 Soapy); host port 1 data are 32-bit words.
@@ -19,7 +19,8 @@ Soapy); host port 1 data are 32-bit words.
   {"cmd": "config", "rate": 1e6, "freq": 915e6, "rx_freq": .., "tx_freq": .., "bandwidth": 1e6,
    "rx_gain_mode": "slow_attack" | "fast_attack" | "hybrid" | "manual", "rx_gain": 40,
    "tx_atten": 20, "loopback": 0 | 1}  -> the settings as read back. Any rate from 0.52 to 61.44 MSPS
-                                         (libad9361 designs the FIR); keys given are applied in this
+                                         (up to 40 MSPS with libad9361's FIR, above that the
+                                         driver's filters alone); keys given are applied in this
                                          order, the others are left as they are
   {"cmd": "attr", "name": n, "value": v (omit to read)}   -> {"value": ..}: any attribute of the
                                          AD9361 driver: sysfs (e.g. "in_voltage0_rssi") or debugfs
@@ -27,15 +28,23 @@ Soapy); host port 1 data are 32-bit words.
                                          the driver's setup with them; rate, LOs, bandwidth, gain
                                          mode / gain and TX attenuation are kept, unless their own
                                          device-tree parameter was written)
-  {"cmd": "tx_cyclic", "bytes": n} + n bytes CS16      -> repeat the waveform until tx_stop
+  {"cmd": "tx_cyclic", "bytes": n} + n bytes CS16      -> repeat the waveform until tx_stop;
+                                         {"mode": "hardware"}: from a cyclic DMA buffer (any rate,
+                                         no CPU; up to CYCLIC_MAX samples), else "stream" (written
+                                         by a thread, up to about 20 MSPS)
   {"cmd": "tx_stop"}
   {"cmd": "tx_burst", "bytes": n, "delay": s} + CS16   -> one burst at hardware time now + s (or
                                                           "time": ns), ended (end of burst); returns
                                                           once queued, so bursts can be scheduled
                                                           ahead; tx_stop cancels what is left
   {"cmd": "time"}                     -> {"time": ns}: the shell's hardware time (sample clock)
-  {"cmd": "rx", "n": N}               -> {"bytes": 4N} + N contiguous CS16 samples (read on the
-                                         board first, then sent); {"time": ns} of the first sample
+  {"cmd": "rx", "n": N}               -> {"bytes": 4N} + N CS16 samples (read on the board
+                                         first, then sent); {"time": ns} of the first sample;
+                                         {"overflows": k, "dropped": d, "drops": [[i, m], ..]}:
+                                         k gaps (from the packet times), d samples lost in all, the
+                                         first DROPS_MAX as m samples lost before sample i. The
+                                         samples are contiguous when k = 0. Captured in C
+                                         (libglidelink_fast.so, up to 50 MSPS)
   {"cmd": "host1", "n_out": M, "bytes": n} + n bytes   -> words through host port 1 (routes as set):
                                                           {"bytes": 4M} + M words back
   {"cmd": "route", "routes": {"slot0_in": "host1_tx", ...}}   sink: source (gr-glidelink names);
@@ -65,7 +74,29 @@ from glidelinkd import IioDev, SHELL_ROUTE, SHELL_PORT_RESET, SINKS, SOURCES, SI
 
 CHUNK = 65536
 PROTOCOL = 1
+# fields added within protocol 1 (old clients ignore them): 1 = rx drops ("overflows", "dropped",
+# "drops"), tx_cyclic "mode", info "fast"
+PROTOCOL_REV = 1
 HERE = os.path.dirname(os.path.abspath(__file__))
+CYCLIC_MAX = 1 << 23             # samples (32 MB) in the TX cyclic buffer; longer: streamed
+DROPS_MAX = 64
+
+
+def load_fast():
+    """the C paths (glidelink_fast.c), None if the library is not built (then Python, <= 20 MSPS)"""
+    path = os.path.join(HERE, "libglidelink_fast.so")
+    if not os.path.exists(path):
+        print("libglidelink_fast.so not found: RX and cyclic TX in Python (up to about 20 MSPS)", flush=True)
+        return None
+    lib = ctypes.CDLL(path, use_errno=True)
+    ll, llp = ctypes.c_longlong, ctypes.POINTER(ctypes.c_longlong)
+    lib.gl_rx.restype = ll
+    lib.gl_rx.argtypes = [ctypes.c_void_p, ll, ll, ctypes.c_double, ctypes.c_double, ctypes.c_uint32,
+                          llp, llp, llp, llp, llp, ctypes.c_int]
+    lib.gl_tx_cyclic_start.restype = ctypes.c_void_p
+    lib.gl_tx_cyclic_start.argtypes = [ctypes.c_void_p, ll, ctypes.c_uint32]
+    lib.gl_tx_cyclic_stop.argtypes = [ctypes.c_void_p]
+    return lib
 
 
 def load_image(bit):
@@ -81,6 +112,9 @@ def load_image(bit):
     subprocess.run(["bash", loader, os.path.basename(bit), name + ".dtbo"], cwd=os.path.dirname(bit),
                    check=True, timeout=180)
     return name
+
+
+FIR_MAX_RATE = 40e6
 
 
 def set_bb_rate(rate):
@@ -109,7 +143,9 @@ class Bridge:
         # the RF through host port 0 in both directions (an offline image routes it elsewhere)
         self.routes({"host0_rx": "rf_rx", "rf_tx": "host0_tx"})
         self.dev = SoapySDR.Device(a.args)
+        self.fast = load_fast()
         self.tx_thread, self.tx_run, self.tx_owner, self.burst = None, False, None, None
+        self.cyclic = None                               # hardware cyclic TX buffer (C handle)
         self.dt_written = set()                          # device-tree parameters written since the last setup
         self.lock = threading.Lock()
 
@@ -128,6 +164,24 @@ class Bridge:
         if flush:
             self.shell.reg(SHELL_PORT_RESET, flush)
 
+    def slots_on_path(self, port, rx):
+        """PORT_RESET bits of the module slots chained upstream of sink `port` (rx) or downstream
+        of source `port` (Soapy module slotsOnPath): flushed with the host port"""
+        n = (self.shell.reg(0x008) >> 24) & 0xff
+        route = [self.shell.reg(SHELL_ROUTE + 4 * j) for j in range(3 + n)]
+        slot_of = {(2 if k == 0 else 3 + k): k for k in range(n)}
+        bits, at = 0, port
+        for _ in range(n):
+            if rx:
+                k = slot_of.get(route[at]) if at < len(route) else None
+            else:
+                k = next((slot_of.get(j) for j in range(len(route)) if route[j] == at), None)
+            if k is None:
+                break
+            bits |= 1 << (2 if k == 0 else 4 + k)
+            at = 2 if k == 0 else 3 + k
+        return bits
+
     def settings(self):
         p = self.phy
         return {"rate": float(p.attr("in_voltage_sampling_frequency")),
@@ -145,7 +199,15 @@ class Bridge:
             if self.burst is not None and float(r["rate"]) != d.getSampleRate(SOAPY_SDR_TX, 0):
                 self.close_burst()                       # the burst stream turns burst times into
                                                          # samples at the rate it was opened with
-            set_bb_rate(float(r["rate"]))
+            rate = float(r["rate"])
+            if rate > FIR_MAX_RATE:
+                # libad9361 0.2 loads a fixed 96-tap FIR above 40 MSPS, with which RF RX is
+                # unusable (measured at 46 to 50 MSPS: a quarter of the samples near full
+                # scale); the driver alone (as the Soapy module sets the rate) is clean
+                p.attr("in_out_voltage_filter_fir_en", 0)
+                p.attr("in_voltage_sampling_frequency", int(round(rate)))
+            else:
+                set_bb_rate(rate)
         for key, direction in (("freq", None), ("rx_freq", SOAPY_SDR_RX), ("tx_freq", SOAPY_SDR_TX)):
             if key in r:
                 for dr in ((SOAPY_SDR_RX, SOAPY_SDR_TX) if direction is None else (direction,)):
@@ -207,9 +269,20 @@ class Bridge:
 
     # ------------------------------------------------------------------ streams
     def tx_cyclic(self, data):
+        """"hardware" (a cyclic DMA buffer) or "stream" (a thread writing it, up to about 20 MSPS)"""
         self.tx_stop()
         self.close_burst()
         iq = np.frombuffer(data, np.int16).copy()
+        if self.fast is not None and 0 < len(iq) // 2 <= CYCLIC_MAX:
+            if (len(iq) // 2) % 2:                       # 64-bit DMA words: two periods
+                iq = np.tile(iq, 2)
+            h = self.fast.gl_tx_cyclic_start(iq.ctypes.data, len(iq) // 2, self.slots_on_path(1, False))
+            if h:
+                self.cyclic = h
+                for ch in (0x418, 0x458):                # DAC data from the DMA
+                    self.dds.reg(ch, 2)
+                return "hardware"
+            print(f"cyclic buffer of {len(iq) // 2} samples: error {ctypes.get_errno()}, streaming", flush=True)
         self.tx_run = True
 
         def loop():
@@ -231,29 +304,61 @@ class Bridge:
             self.dev.closeStream(s)
         self.tx_thread = threading.Thread(target=loop, daemon=True)
         self.tx_thread.start()
+        return "stream"
 
     def tx_stop(self):
         self.close_burst()
+        if self.cyclic is not None:
+            self.fast.gl_tx_cyclic_stop(self.cyclic)
+            self.cyclic = None
         self.tx_run = False
         if self.tx_thread is not None:
             self.tx_thread.join(5)
             self.tx_thread = None
 
     def rx(self, n):
-        """(n contiguous CS16 samples, hardware time of the first in ns or None)"""
+        """(n CS16 samples, {"time": ns of the first or None, "overflows", "dropped", "drops"})"""
         out = np.empty(2 * n, np.int16)
+        rate = self.dev.getSampleRate(SOAPY_SDR_RX, 0)
+        timeout = max(10.0, 2.0 * n / rate)
+        if self.fast is not None:
+            # IIO buffers of about 5 ms (4 queued: 20 ms of slack for the capture loop), not much
+            # longer than the capture (a buffer is only handed over when full)
+            buflen = min(262144, max(8192, 1 << int(np.ceil(np.log2(rate * 0.005)))))
+            buflen = min(buflen, (n + 4 * (n // 4096 + 2) + 7) // 8 * 8)
+            ll = ctypes.c_longlong
+            t, ovf, dropped = ll(), ll(), ll()
+            pos, lens = (ll * DROPS_MAX)(), (ll * DROPS_MAX)()
+            got = self.fast.gl_rx(out.ctypes.data, n, buflen, rate, timeout, self.slots_on_path(1, True),
+                                  ctypes.byref(t), ctypes.byref(ovf), ctypes.byref(dropped), pos, lens, DROPS_MAX)
+            if got < 0:
+                raise RuntimeError(f"rx: error {-got} ({os.strerror(-got)})")
+            k = min(ovf.value, DROPS_MAX)
+            info = {"time": t.value if t.value >= 0 else None, "overflows": ovf.value,
+                    "dropped": dropped.value, "drops": [[pos[j], lens[j]] for j in range(k)]}
+            return out[:2 * got].tobytes(), info
         s = self.dev.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [0], {"bufferLength": str(CHUNK), "headers": "true"})
         self.dev.activateStream(s)
-        got, t0, t_first = 0, time.time(), None
-        while got < n and time.time() - t0 < max(10.0, 2.0 * n / self.dev.getSampleRate(SOAPY_SDR_RX, 0)):
+        got, t0, t_first, t_next = 0, time.time(), None, None
+        info = {"overflows": 0, "dropped": 0, "drops": []}
+        while got < n and time.time() - t0 < timeout:
             r = self.dev.readStream(s, [out[2 * got:]], min(CHUNK, n - got), timeoutUs=1000000)
             if r.ret > 0:
-                if got == 0 and r.flags & SOAPY_SDR_HAS_TIME:
-                    t_first = r.timeNs
+                if r.flags & SOAPY_SDR_HAS_TIME:
+                    if got == 0:
+                        t_first = r.timeNs
+                    elif t_next is not None and r.timeNs > t_next + 1e9 / rate / 2:
+                        lost = int(round((r.timeNs - t_next) * rate / 1e9))
+                        info["overflows"] += 1
+                        info["dropped"] += lost
+                        if len(info["drops"]) < DROPS_MAX:
+                            info["drops"].append([got, lost])
+                    t_next = r.timeNs + r.ret * 1e9 / rate
                 got += r.ret
         self.dev.deactivateStream(s)
         self.dev.closeStream(s)
-        return out[:2 * got].tobytes(), t_first
+        info["time"] = t_first
+        return out[:2 * got].tobytes(), info
 
     def tx_burst(self, data, t_ns):
         """queues one timed burst and returns at once. A sender thread writes the queue to the TX
@@ -261,7 +366,7 @@ class Bridge:
         its buffer until it has been sent, so writing from the request would block the client
         once a few bursts are scheduled ahead. The stream stays open until tx_stop, a cyclic
         transmission or the client leaves (which cancel what has not been sent)."""
-        if self.tx_thread is not None:
+        if self.tx_thread is not None or self.cyclic is not None:
             raise RuntimeError("cyclic TX running: tx_stop first")
         iq = np.frombuffer(data, np.int16)
         if (len(iq) // 2) % 2:                           # the DMA moves 64-bit words: a packet of
@@ -362,20 +467,22 @@ class Bridge:
 
     def command(self, cmd, r, data, reply, who):
         if cmd == "info":
-            reply({"ok": True, "protocol": PROTOCOL, "driver": "glidelink", "image": self.image,
-                   "shell": f"{self.shell.reg(0x004):08X}", **self.settings()})
+            reply({"ok": True, "protocol": PROTOCOL, "protocol_rev": PROTOCOL_REV, "driver": "glidelink", "image": self.image,
+                   "shell": f"{self.shell.reg(0x004):08X}", "fast": self.fast is not None, **self.settings()})
         elif cmd == "config":
             reply({"ok": True, **self.config(r)})
         elif cmd == "tx_cyclic":
-            self.tx_cyclic(data)
+            mode = self.tx_cyclic(data)
             self.tx_owner = who
-            reply({"ok": True, "samples": len(data) // 4})
+            reply({"ok": True, "samples": len(data) // 4, "mode": mode})
         elif cmd == "tx_stop":
             self.tx_stop()
             reply({"ok": True})
         elif cmd == "rx":
-            data, t = self.rx(int(r["n"]))
-            reply({"ok": True, "time": t}, data)
+            data, info = self.rx(int(r["n"]))
+            if info["overflows"]:
+                print(f"rx: {info['overflows']} gaps, {info['dropped']} samples lost", flush=True)
+            reply({"ok": True, **info}, data)
         elif cmd == "attr":
             reply({"ok": True, "value": self.attr(r["name"], r.get("value"))})
         elif cmd == "time":

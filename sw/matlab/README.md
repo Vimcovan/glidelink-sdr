@@ -48,8 +48,16 @@ USRP Radio 和 for Analog Devices ADALM-Pluto Radio。
 
 - 桥接服务的突发发射流按打开时的采样率把突发时间换算成采样数。同一连接里改采样率后，突发在错误时刻反复发出。
   已改为改采样率时关闭突发流，下一个突发按新采样率重新打开（两块板已更新）。
-- 采样率高于 20 MSPS 时发射通路跟不上：30 MSPS 循环发射的波形中间有空隙，定时突发的间隔按约 0.65 的比例缩短。
-  20 MSPS 及以下正常。原因待查。
+- 采样率高于 20 MSPS 时采样会丢失：30 MSPS 循环发射的波形中间有空隙，定时突发的间隔按约 0.65 的比例缩短。
+  原因在桥接服务：接收用 Python 逐包读取（每 4096 个采样调用一次），约 20 MSPS 封顶，丢失也不报告；
+  循环发送由 Python 线程反复写入。现在接收在 C 库 `sw/bridge/libglidelink_fast.so`（`glidelink_fast.c`，
+  `install.sh` 在板上编译）中完成，并按包头时间报告丢失；循环发送用 libiio 的循环缓冲区，由 DMA 硬件重复，
+  不占 CPU。`sw/tests/bridge_rate.py` 在 20、30、30.72、40、50 MSPS 下验证（发射板 → 接收板，以及发射板
+  自发自收）：1 ms 线性调频 + 1 ms 静默的循环波形，周期误差不超过 ±1 个采样（两板时钟差与取整）；三个相隔
+  50 ms 的定时突发，测得间隔 50.000 ms；接收均无丢失。两块板已更新。
+- libad9361（板上 0.2 版）在 40 MSPS 以上加载固定的 96 阶 FIR，此时射频接收不可用（46～50 MSPS 实测约四分之一的
+  采样接近满幅，与发射无关）。桥接服务在 40 MSPS 以上关闭 FIR，直接写驱动的采样率（与 Soapy 模块相同），
+  接收正常；40 MSPS 及以下仍由 libad9361 设计 FIR。
 - 接收板的镜像（`glidelink_rx`）没有主机到 DAC 的发射数据通路，只有发射板的镜像能收发。
 
 - 接收板的发射本振与接收本振同频时会漏进接收通道，在 −0.6 kHz 处形成一根约 −53 dBFS 的谱线（与载频无关）。
@@ -87,10 +95,10 @@ OFDM 重复运行时，快速 AGC 约每 6 次有 1 次锁得偏高约 13 dB（6
 | 调用 | 作用 |
 |---|---|
 | `r = glidelink.Radio("192.168.4.1")` | 连接（检查桥接协议版本） |
-| `s = r.config(Rate=1e6, Freq=915e6, Bandwidth=2e6, RxGain=40, TxAtten=20)` | 射频设置并读回；另有 `RxFreq`、`TxFreq`、`RxGainMode`（`"slow_attack"`、`"fast_attack"`、`"hybrid"`、`"manual"`）、`Loopback`（AD9361 数字环回）。采样率 0.52～61.44 MSPS（按采样率设计 FIR） |
-| `r.txCyclic(x)` / `r.txStop()` | 在板上循环发送一段波形（复数，abs(x) ≤ 1），不占网络 |
+| `s = r.config(Rate=1e6, Freq=915e6, Bandwidth=2e6, RxGain=40, TxAtten=20)` | 射频设置并读回；另有 `RxFreq`、`TxFreq`、`RxGainMode`（`"slow_attack"`、`"fast_attack"`、`"hybrid"`、`"manual"`）、`Loopback`（AD9361 数字环回）。采样率 0.52～61.44 MSPS（40 MSPS 及以下由 libad9361 按采样率设计 FIR，以上只用驱动自身的滤波器；发射数据接口在 50 MSPS 以内逐位正确） |
+| `r.txCyclic(x)` / `r.txStop()` | 在板上循环发送一段波形（复数，abs(x) ≤ 1），不占网络。波形不超过 2^23 个采样时放进 DMA 循环缓冲区，由硬件重复（任意采样率，不占 CPU；奇数长度时放两个周期）；更长时由板上线程写入（约 20 MSPS 以内） |
 | `t = r.txBurst(x, 0.1)` / `r.txBurst(x, [], t)` | 在硬件时间"现在 + 0.1 s"（或 t，单位 ns）发送一个突发，按突发结束；排队后即返回，可以提前排定多个突发（桥接服务按顺序发送） |
-| `[y, t] = r.rx(n)` | 在板上连续采集 n 个采样（复数，满幅为 1）后发回；t 为第一个采样的硬件时间（ns） |
+| `[y, t, d] = r.rx(n)` | 在板上连续采集 n 个采样（复数，满幅为 1）后发回；t 为第一个采样的硬件时间（ns）。采集由板上的 C 库完成，50 MSPS 以内无丢失。d 为丢失报告：`Overflows` 缺口数，`Dropped` 丢失的采样总数，`Drops` 每行 [位置, 丢失数]（第“位置 + 1”个采样之前丢了这么多）；有丢失时给出警告 `glidelink:rxDrops`，此时数据不连续 |
 | `t = r.time()` | 硬件时间（采样时钟），ns |
 | `v = r.attr(name)` / `r.attr(name, value)` | AD9361 驱动的任意属性：sysfs（`"in_voltage0_rssi"` 等）或驱动参数（`"adi,agc-inner-thresh-high"` 等；`r.attr("initialize", 1)` 按这些参数重新初始化，桥接服务在初始化前后保持采样率、本振、带宽、增益模式 / 增益和发射衰减，客户端改过对应设备树参数的项除外）。驱动参数改动后一直有效，直到再改或板子重启 |
 | `r.route(struct("slot0_in", "host1_tx", "host1_rx", "slot0_out"))` | 流交换路由，接收端 <- 来源 |
