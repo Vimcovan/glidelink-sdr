@@ -1,0 +1,35 @@
+# GlideLink user module description (docs/design.md 5.3)
+id: nco
+name: NCO mixer
+rtl: glidelink_nco.v
+top: glidelink_nco
+model: model.py
+id_value: 0x4E434F31          # "NCO1", register ID
+version: 1.0.0
+data:
+  input: sc16                 # {Q[31:16], I[15:0]}
+  output: sc16
+  latency_cycles: 5
+  tuser: passed with its sample
+function: >-
+  x[n] * exp(j 2 pi phase[n] / 2^32), phase[n] = PHASE + n FREQ; 4096-point table
+  round(32767 cos / sin); products rounded (+2^14, >> 15) and saturated.
+  Disabled: samples pass unchanged, the phase holds.
+registers:
+  - {name: ID, offset: 0x000, access: ro}
+  - {name: VERSION, offset: 0x004, access: ro}
+  - name: CONTROL
+    offset: 0x008
+    access: rw
+    default: 0
+    fields:
+      - {name: enable, bits: 0, doc: "1 = mix, 0 = pass unchanged"}
+      - {name: soft_reset, bits: 1, doc: "self-clearing: pipeline emptied, phase = PHASE"}
+  - {name: STATUS, offset: 0x00C, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: FREQ, offset: 0x010, access: rw, default: 0, doc: "phase increment per sample = f / fs * 2^32"}
+  - {name: PHASE, offset: 0x014, access: rw, default: 0, doc: "write: phase of the next sample; read: current phase"}
+resources:                    # in the shell, xczu5eg, Vivado 2025.2 (table in LUTs)
+  lut: 1076
+  ff: 392
+  dsp: 4
+  bram36: 0

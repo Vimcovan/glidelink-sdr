@@ -83,10 +83,10 @@ set shell_sync [get_cells -hier -filter {NAME =~ *shell/inst/* && ASYNC_REG == T
 set_max_delay -datapath_only 4.0 -from [get_clocks clk_pl_0] -to $shell_sync
 set_max_delay -datapath_only 4.0 -from [get_clocks clk_pl_3] -to $shell_sync
 set_max_delay -datapath_only 4.0 -from [get_clocks rx_clk] -to $shell_sync
-# slot register bridge: request (address, data, direction) and read response
-set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/i_slot0_cdc/addr_reg[*] || NAME =~ *shell/inst/i_slot0_cdc/wdata_reg[*] || NAME =~ *shell/inst/i_slot0_cdc/is_write_reg}] \
+# slot register bridges (one per slot): request (address, data, direction) and read response
+set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/g_slot_cdc*i_cdc/addr_reg* || NAME =~ *shell/inst/g_slot_cdc*i_cdc/wdata_reg* || NAME =~ *shell/inst/g_slot_cdc*i_cdc/is_write_reg}] \
   -to [get_clocks clk_pl_3]
-set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/i_slot0_cdc/resp_data_reg[*]}] \
+set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/g_slot_cdc*i_cdc/resp_data_reg*}] \
   -to [get_clocks clk_pl_0]
 set_false_path -to [get_cells -hier -filter {NAME =~ *shell/inst/i_regs/ctrl_out_m1_reg[*]}]
 set_max_delay -datapath_only 4.0 -from [get_cells -hier -filter {NAME =~ *shell/inst/i_regs/snap_reg[*]}] \

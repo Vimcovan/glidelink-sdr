@@ -1,0 +1,34 @@
+id: glidelink_fir
+label: GlideLink FIR (PL)
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: args
+    label: Device arguments
+    dtype: string
+    default: 'driver=glidelink'
+-   id: slot
+    label: Slot
+    dtype: int
+    default: '2'
+-   id: taps
+    label: Coefficients (int16)
+    dtype: int_vector
+    default: '[32767]'
+-   id: shift
+    label: Output shift
+    dtype: int
+    default: '15'
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.fir(${args}, ${slot}, ${taps}, ${shift})
+    callbacks:
+    - set_taps(${taps})
+    - set_shift(${shift})
+
+documentation: |-
+    Proxy for the FIR filter in a PL slot: loads its coefficients and shift and enables it; passes no data. Route the data through the slot with GlideLink Control.
+
+file_format: 1

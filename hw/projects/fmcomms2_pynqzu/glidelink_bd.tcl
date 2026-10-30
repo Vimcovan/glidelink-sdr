@@ -69,6 +69,9 @@ ad_connect tdd_sync_i util_ad9361_tdd_sync/sync_in
 # GlideLink shell
 
 add_files -norecurse [glob $::glidelink_hw_dir/library/glidelink_shell/*.v]
+# user modules in the slots (docs/phase3_modules.md) and their register interface
+add_files -norecurse [glob $::glidelink_hw_dir/library/glidelink_module/*.v]
+add_files -norecurse [glob $::glidelink_hw_dir/modules/*/*.v]
 update_compile_order -fileset sources_1
 
 create_bd_cell -type module -reference glidelink_shell shell

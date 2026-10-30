@@ -98,8 +98,10 @@ const HostPort HOST_PORTS[2] = {
 	{"glidelink-host1-rx", "glidelink-host1-tx", 1u << 3, 1u << 4, 1u << 4, 1u << 5, 3, 3},
 };
 const unsigned SHELL_VERSION_HOST1 = 0x00010200;
-// slot 0: its input is switch sink 2, its output switch source 2
-const unsigned SLOT0_SINK = 2, SLOT0_SOURCE = 2, PORT_RESET_SLOT0 = 1u << 2;
+// slot k: switch sink and source 2 for k = 0, 3 + k after that; PORT_RESET bit
+// 2 for slot 0, 4 + k after that (shell 1.4: three slots)
+unsigned slotPort(unsigned k) { return k == 0 ? 2 : 3 + k; }
+unsigned slotReset(unsigned k) { return k == 0 ? 1u << 2 : 1u << (4 + k); }
 
 // A re-initialisation brings back the device tree's values; the standard
 // parameters are restored afterwards unless their device-tree parameter was
@@ -845,10 +847,11 @@ private:
 	// a stream that was torn down can leave a packet cut off in the shell (the
 	// DMA stops mid-transfer), which PORT_RESET clears; RX is unrouted
 	// meanwhile, and the switch reconnects it at the start of a packet. Routes
-	// the user set (e.g. through a module slot) are kept; host port 0 falls back
-	// to the RF channels where its route is empty. Host port 1 also flushes the
-	// slot it is directly connected to, which a stream stopped mid-packet leaves
-	// holding part of a packet.
+	// the user set (e.g. through module slots) are kept; host port 0 falls back
+	// to the RF channels where its route is empty. The slots on the port's path
+	// (upstream of RX, downstream of TX) are flushed too: a stream stopped
+	// mid-packet leaves them holding part of a packet (a flush keeps their
+	// registers).
 	void setPortHeaders(const Stream *s, bool on)
 	{
 		if (!shell || readRegister("FPGA", REG_VERSION) < SHELL_VERSION_HEADERS)
@@ -858,10 +861,7 @@ private:
 		unsigned bit = rx ? hp.rxHdr : hp.txHdr;
 		unsigned cfg = readRegister("FPGA", REG_CONFIG);
 		cfg = on ? (cfg | bit) : (cfg & ~bit);
-		unsigned slot = 0;
-		if (s->port == 1 && (rx ? readRegister("FPGA", REG_ROUTE + 4 * hp.rxSink) == SLOT0_SOURCE
-					: readRegister("FPGA", REG_ROUTE + 4 * SLOT0_SINK) == hp.txSource))
-			slot = PORT_RESET_SLOT0;
+		unsigned slot = slotsOnPath(rx ? hp.rxSink : hp.txSource, rx);
 		if (rx) {
 			unsigned addr = REG_ROUTE + 4 * hp.rxSink;
 			unsigned route = readRegister("FPGA", addr);
@@ -890,6 +890,40 @@ private:
 			throw;
 		}
 		iio_context_set_timeout(ctx, DEFAULT_TIMEOUT_MS);
+	}
+
+	// PORT_RESET bits of the slots chained to a port: upstream of sink `from`
+	// (rx) or downstream of source `from`
+	unsigned slotsOnPath(unsigned from, bool rx)
+	{
+		unsigned n = (readRegister("FPGA", 0x008) >> 24) & 0xff;
+		std::vector<unsigned> route(3 + n);
+		for (unsigned j = 0; j < route.size(); j++)
+			route[j] = readRegister("FPGA", REG_ROUTE + 4 * j);
+		auto slotOf = [&](unsigned port) {
+			for (unsigned k = 0; k < n; k++)
+				if (slotPort(k) == port)
+					return int(k);
+			return -1;
+		};
+		unsigned bits = 0;
+		unsigned at = from;
+		for (unsigned hops = 0; hops < n; hops++) {
+			int k;
+			if (rx) {                       // the source feeding sink `at`
+				if (at >= route.size() || (k = slotOf(route[at])) < 0)
+					break;
+			} else {                        // the sink fed by source `at`
+				unsigned j = 0;
+				while (j < route.size() && route[j] != at)
+					j++;
+				if (j == route.size() || (k = slotOf(j)) < 0)
+					break;
+			}
+			bits |= slotReset(k);
+			at = slotPort(k);
+		}
+		return bits;
 	}
 
 	// driver re-initialisation, then the standard parameters as they were

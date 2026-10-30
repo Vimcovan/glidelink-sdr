@@ -26,8 +26,9 @@ import pmt
 import SoapySDR
 from gnuradio import gr
 
-SINKS = {"rf_tx": 0, "host0_rx": 1, "slot0_in": 2, "host1_rx": 3}
-SOURCES = {"rf_rx": 0, "host0_tx": 1, "slot0_out": 2, "host1_tx": 3, "none": 15}
+SINKS = {"rf_tx": 0, "host0_rx": 1, "slot0_in": 2, "host1_rx": 3, "slot1_in": 4, "slot2_in": 5}
+SOURCES = {"rf_rx": 0, "host0_tx": 1, "slot0_out": 2, "host1_tx": 3, "slot1_out": 4, "slot2_out": 5,
+           "none": 15}
 REG_ROUTE = 0x1000
 INTERFACES = ("AD9361", "FPGA")
 

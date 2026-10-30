@@ -22,3 +22,4 @@ except ModuleNotFoundError:
 # import any pure python here
 from .control import control
 from .host_port import host_source, host_sink
+from .modules import nco_model, nco, fir_model, fir

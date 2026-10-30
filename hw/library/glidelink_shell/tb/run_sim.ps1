@@ -13,6 +13,9 @@ try {
   $files = @{}
   Get-ChildItem (Join-Path $here "..\*.v") | ForEach-Object { $files[$_.Name] = $_.FullName }
   Get-ChildItem (Join-Path $here "..\wip\*.v") -ErrorAction SilentlyContinue | ForEach-Object { $files[$_.Name] = $_.FullName }
+  # the user modules in the slots, and their shared register interface
+  Get-ChildItem (Join-Path $here "..\..\glidelink_module\*.v") | ForEach-Object { $files[$_.Name] = $_.FullName }
+  Get-ChildItem (Join-Path $here "..\..\..\modules\*\*.v") | ForEach-Object { $files[$_.Name] = $_.FullName }
   $src = $files.Values
   & "$Bin\xvlog.bat" --nolog $src (Join-Path $here "$Top.v") | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "xvlog failed" }

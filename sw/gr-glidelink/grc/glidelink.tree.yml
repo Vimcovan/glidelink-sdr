@@ -2,3 +2,7 @@
 - glidelink_control
 - glidelink_host_source
 - glidelink_host_sink
+- glidelink_nco_model
+- glidelink_nco
+- glidelink_fir_model
+- glidelink_fir

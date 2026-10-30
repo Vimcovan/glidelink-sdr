@@ -10,5 +10,9 @@ install(FILES
     glidelink_control.block.yml
     glidelink_host_source.block.yml
     glidelink_host_sink.block.yml
+    glidelink_nco_model.block.yml
+    glidelink_nco.block.yml
+    glidelink_fir_model.block.yml
+    glidelink_fir.block.yml
     glidelink.tree.yml
     DESTINATION share/gnuradio/grc/blocks)

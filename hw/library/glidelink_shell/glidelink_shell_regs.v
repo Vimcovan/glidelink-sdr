@@ -19,7 +19,7 @@
 //   0x058  HOST0_RX_OVF RO  host port 0 RX: words the DMA could not take (FIFO interface)
 //   0x05C  PORT_RESET   W   bit 0: flush host port 0 RX, bit 1: flush host port 0 TX (and the
 //                           RF TX streamer), bit 2: reset slot 0, bit 3 / 4: flush host port 1
-//                           RX / TX; held 16 cycles, self-clearing
+//                           RX / TX, bit 5 / 6: reset slot 1 / 2; held 16 cycles, self-clearing
 //   0x060  HOST1_TX_ERR RO  host port 1 TX: words dropped looking for a packet header
 //   0x064  HOST1_RX_OVF RO  host port 1 RX: words the DMA could not take
 //   0x050  RX_PKT_LEN   RW  samples per RX packet (default 4096)
@@ -94,12 +94,12 @@ module glidelink_shell_regs #(
   output            host0_tx_hdr,
   output            host1_rx_hdr,
   output            host1_tx_hdr,
-  output     [4:0]  port_reset,             // CPU clock, 16-cycle pulses
+  output     [6:0]  port_reset,             // CPU clock, 16-cycle pulses
   output [N_SNK*4-1:0] route
 );
 
   localparam [31:0] ID = 32'h474C4B53;
-  localparam [31:0] VERSION = 32'h00010300;    // 1.3.0: one set of tuser flags (timed = bit 2)
+  localparam [31:0] VERSION = 32'h00010400;    // 1.4.0: three slots (passthrough, NCO, FIR)
 
   // ---------------------------------------------------------------------------
   // AXI4-Lite: one outstanding write and one outstanding read
@@ -124,7 +124,7 @@ module glidelink_shell_regs #(
   reg  [15:0] pkt_len = 16'd4096;
   reg  [5:0]  cfg = 6'b000011;
   reg  [N_SNK*4-1:0] routes = ROUTE_RESET;
-  reg  [4:0]  prst = 5'd0;
+  reg  [6:0]  prst = 7'd0;
   reg  [3:0]  prst_cnt = 4'd0;
   reg  [31:0] time_set_lo = 32'd0, time_set_hi = 32'd0;
 
@@ -182,19 +182,19 @@ module glidelink_shell_regs #(
       time_set_lo <= 32'd0;
       time_set_hi <= 32'd0;
       load_req <= 1'b0;
-      prst <= 5'd0;
+      prst <= 7'd0;
       prst_cnt <= 4'd0;
     end else begin
       if (prst_cnt != 4'd0)
         prst_cnt <= prst_cnt - 4'd1;
       else
-        prst <= 5'd0;
+        prst <= 7'd0;
       if (wr_fire) begin
       case (waddr[12:2])
         11'h003: scratch <= wdata;
         11'h014: if (wdata[15:0] != 16'd0) pkt_len <= wdata[15:0];
         11'h015: cfg <= wdata[5:0];
-        11'h017: if (wdata[4:0] != 5'd0) begin prst <= wdata[4:0]; prst_cnt <= 4'hF; end
+        11'h017: if (wdata[6:0] != 7'd0) begin prst <= wdata[6:0]; prst_cnt <= 4'hF; end
         11'h006: time_set_lo <= wdata;
         11'h007: time_set_hi <= wdata;
         11'h008: if (wdata[0] && !load_pending) load_req <= ~load_req;

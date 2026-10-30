@@ -1,19 +1,23 @@
 // ***************************************************************************
-// GlideLink shell, steps 1.3 / 1.4 (docs/phase1_shell.md)
+// GlideLink shell (docs/phase1_shell.md; slots 1 / 2: docs/phase3_modules.md)
 //
-//   sources: 0 RF RX (RX streamer), 1 host port 0 TX, 2 slot 0 out, 3 host port 1 TX
-//   sinks:   0 RF TX (TX streamer), 1 host port 0 RX, 2 slot 0 in, 3 host port 1 RX
+//   sources: 0 RF RX (RX streamer), 1 host port 0 TX, 2 slot 0 out, 3 host port 1 TX,
+//            4 slot 1 out, 5 slot 2 out
+//   sinks:   0 RF TX (TX streamer), 1 host port 0 RX, 2 slot 0 in, 3 host port 1 RX,
+//            4 slot 1 in, 5 slot 2 in
+//   slots:   0 passthrough, 1 NCO mixer (hw/modules/nco), 2 FIR (hw/modules/fir)
 //
 // The stream switch connects them (routes from the registers; reset routes
 // RF RX -> host 0 RX and host 0 TX -> RF TX). Host port 0 carries 16-byte
 // packet headers or raw samples (CONFIG bits 2 / 3). Register window:
-// 0x0000-0x1FFF shell registers and routes (CPU clock), 0x2000 slot 0
-// (processing clock, through an AXI4-Lite clock-domain bridge).
+// 0x0000-0x1FFF shell registers and routes (CPU clock), 0x2000 + 0x1000 k
+// slot k (processing clock, each through an AXI4-Lite clock-domain bridge).
 // PORT_RESET flushes a host port before a stream starts: RX drops the switch
 // connection into host port 0 RX and resets its adapter; TX resets the host
 // TX adapter, the switch's packet state for it and the RF TX streamer, and drops
-// whatever the RF TX sink was connected to; slot 0 resets the slot and its
-// switch connections (a slot left holding half a packet).
+// whatever the RF TX sink was connected to; a slot reset flushes the slot's
+// stream state (its registers are kept) and its switch connections (a slot
+// left holding half a packet).
 // Switch packets carry tuser = {flags[7:0], timestamp[63:0]} on the first
 // beat, one set of flags for every port (host port headers carry them as
 // they are): bit 0 = packets were dropped before this one, bit 1 = end of
@@ -95,7 +99,7 @@ module glidelink_shell (
   input             host1_tx_last
 );
 
-  localparam N_SRC = 4, N_SNK = 4;
+  localparam N_SRC = 6, N_SNK = 6, N_SLOTS = 3;
 
   wire        rst = !rstn;
   wire [63:0] time_now;
@@ -104,29 +108,30 @@ module glidelink_shell (
   wire [31:0] ovf_gray, unf_gray, late_gray, herr_gray, herr1_gray;
   reg  [31:0] dma_ovf = 32'd0, dma_ovf_gray = 32'd0, dma1_ovf = 32'd0, dma1_ovf_gray = 32'd0;
   wire [N_SNK*4-1:0] route;
-  wire  [4:0] port_reset;                 // CPU clock: host 0 RX, host 0 TX, slot 0, host 1 RX, host 1 TX
-  (* ASYNC_REG = "TRUE" *) reg [4:0] prst_m1 = 5'd0, prst_s = 5'd0;
+  wire  [6:0] port_reset;                 // CPU clock: host 0 RX, host 0 TX, slot 0, host 1 RX, host 1 TX, slot 1, slot 2
+  (* ASYNC_REG = "TRUE" *) reg [6:0] prst_m1 = 7'd0, prst_s = 7'd0;
   wire        rx_flush = prst_s[0];
   wire        tx_flush = prst_s[1];
-  wire        slot_flush = prst_s[2];
   wire        rx1_flush = prst_s[3];
   wire        tx1_flush = prst_s[4];
+  wire  [2:0] slot_rst = {prst_s[6:5], prst_s[2]};
   always @(posedge clk) begin
     prst_m1 <= port_reset;
     prst_s <= prst_m1;
   end
 
   // ---------------------------------------------------------------------------
-  // register window: demux, shell registers, slot 0 through the CDC bridge
+  // register window: demux, shell registers, slots through CDC bridges
 
+  localparam NP = N_SLOTS + 1;
   wire [15:0] r_awaddr, r_araddr;
   wire [31:0] r_wdata;
   wire  [3:0] r_wstrb;
-  wire  [1:0] r_awvalid, r_awready, r_wvalid, r_wready, r_bvalid, r_bready;
-  wire  [1:0] r_arvalid, r_arready, r_rvalid, r_rready;
-  wire [63:0] r_rdata;
+  wire [NP-1:0] r_awvalid, r_awready, r_wvalid, r_wready, r_bvalid, r_bready;
+  wire [NP-1:0] r_arvalid, r_arready, r_rvalid, r_rready;
+  wire [NP*32-1:0] r_rdata;
 
-  glidelink_axil_demux #(.N_PORTS(2)) i_demux (
+  glidelink_axil_demux #(.N_PORTS(NP)) i_demux (
     .clk(s_axi_aclk), .rstn(s_axi_aresetn),
     .s_awvalid(s_axi_awvalid), .s_awready(s_axi_awready), .s_awaddr(s_axi_awaddr),
     .s_wvalid(s_axi_wvalid), .s_wready(s_axi_wready), .s_wdata(s_axi_wdata), .s_wstrb(s_axi_wstrb),
@@ -139,7 +144,8 @@ module glidelink_shell (
     .m_araddr(r_araddr), .m_arvalid(r_arvalid), .m_arready(r_arready),
     .m_rvalid(r_rvalid), .m_rready(r_rready), .m_rdata(r_rdata));
 
-  glidelink_shell_regs #(.HOST_RX(8'd2), .HOST_TX(8'd2), .SLOTS(8'd1), .N_SNK(N_SNK)) i_regs (
+  glidelink_shell_regs #(.HOST_RX(8'd2), .HOST_TX(8'd2), .SLOTS(N_SLOTS), .N_SNK(N_SNK),
+                         .ROUTE_RESET({4'hF, 4'hF, 4'hF, 4'hF, 4'd0, 4'd1})) i_regs (
     .s_axi_aclk(s_axi_aclk), .s_axi_aresetn(s_axi_aresetn),
     .s_axi_awvalid(r_awvalid[0]), .s_axi_awready(r_awready[0]), .s_axi_awaddr(r_awaddr),
     .s_axi_awprot(3'd0), .s_axi_wvalid(r_wvalid[0]), .s_axi_wready(r_wready[0]),
@@ -157,24 +163,30 @@ module glidelink_shell (
     .host1_tx_hdr(host1_tx_hdr), .route(route),
     .port_reset(port_reset));
 
-  wire        sl_awvalid, sl_awready, sl_wvalid, sl_wready, sl_bvalid, sl_bready;
-  wire        sl_arvalid, sl_arready, sl_rvalid, sl_rready;
-  wire [11:0] sl_awaddr, sl_araddr;
-  wire [31:0] sl_wdata, sl_rdata;
+  // slot k: register bus in the processing clock
+  wire [N_SLOTS-1:0]    sl_awvalid, sl_awready, sl_wvalid, sl_wready, sl_bvalid, sl_bready;
+  wire [N_SLOTS-1:0]    sl_arvalid, sl_arready, sl_rvalid, sl_rready;
+  wire [N_SLOTS*12-1:0] sl_awaddr, sl_araddr;
+  wire [N_SLOTS*32-1:0] sl_wdata, sl_rdata;
 
-  glidelink_axil_cdc i_slot0_cdc (
-    .s_clk(s_axi_aclk), .s_rstn(s_axi_aresetn),
-    .s_awvalid(r_awvalid[1]), .s_awready(r_awready[1]), .s_awaddr(r_awaddr[11:0]),
-    .s_wvalid(r_wvalid[1]), .s_wready(r_wready[1]), .s_wdata(r_wdata),
-    .s_bvalid(r_bvalid[1]), .s_bready(r_bready[1]),
-    .s_arvalid(r_arvalid[1]), .s_arready(r_arready[1]), .s_araddr(r_araddr[11:0]),
-    .s_rvalid(r_rvalid[1]), .s_rready(r_rready[1]), .s_rdata(r_rdata[63:32]),
-    .m_clk(clk), .m_rstn(rstn),
-    .m_awvalid(sl_awvalid), .m_awready(sl_awready), .m_awaddr(sl_awaddr),
-    .m_wvalid(sl_wvalid), .m_wready(sl_wready), .m_wdata(sl_wdata),
-    .m_bvalid(sl_bvalid), .m_bready(sl_bready),
-    .m_arvalid(sl_arvalid), .m_arready(sl_arready), .m_araddr(sl_araddr),
-    .m_rvalid(sl_rvalid), .m_rready(sl_rready), .m_rdata(sl_rdata));
+  genvar g;
+  generate
+    for (g = 0; g < N_SLOTS; g = g + 1) begin : g_slot_cdc
+      glidelink_axil_cdc i_cdc (
+        .s_clk(s_axi_aclk), .s_rstn(s_axi_aresetn),
+        .s_awvalid(r_awvalid[g + 1]), .s_awready(r_awready[g + 1]), .s_awaddr(r_awaddr[11:0]),
+        .s_wvalid(r_wvalid[g + 1]), .s_wready(r_wready[g + 1]), .s_wdata(r_wdata),
+        .s_bvalid(r_bvalid[g + 1]), .s_bready(r_bready[g + 1]),
+        .s_arvalid(r_arvalid[g + 1]), .s_arready(r_arready[g + 1]), .s_araddr(r_araddr[11:0]),
+        .s_rvalid(r_rvalid[g + 1]), .s_rready(r_rready[g + 1]), .s_rdata(r_rdata[(g + 1) * 32 +: 32]),
+        .m_clk(clk), .m_rstn(rstn),
+        .m_awvalid(sl_awvalid[g]), .m_awready(sl_awready[g]), .m_awaddr(sl_awaddr[g * 12 +: 12]),
+        .m_wvalid(sl_wvalid[g]), .m_wready(sl_wready[g]), .m_wdata(sl_wdata[g * 32 +: 32]),
+        .m_bvalid(sl_bvalid[g]), .m_bready(sl_bready[g]),
+        .m_arvalid(sl_arvalid[g]), .m_arready(sl_arready[g]), .m_araddr(sl_araddr[g * 12 +: 12]),
+        .m_rvalid(sl_rvalid[g]), .m_rready(sl_rready[g]), .m_rdata(sl_rdata[g * 32 +: 32]));
+    end
+  endgenerate
 
   // ---------------------------------------------------------------------------
   // stream ports
@@ -199,21 +211,67 @@ module glidelink_shell (
     .m_valid(src_valid[1]), .m_ready(src_ready[1]), .m_data(src_data[32 +: 32]),
     .m_user(src_user[72 +: 72]), .m_last(src_last[1]), .errors_gray(herr_gray));
 
+  // slots: slot k is switch sink / source 2 for k = 0, 3 + k after that. Each
+  // input goes through a skid buffer, so a module may tie its s_axis_tready to
+  // its m_axis_tready combinationally (AXI4-Stream allows it) without closing
+  // a loop through the switch.
+
+  localparam [N_SLOTS*8-1:0] SLOT_SINK = {8'd5, 8'd4, 8'd2};
+  wire [N_SLOTS-1:0]     sl_in_valid, sl_in_ready;
+  wire [N_SLOTS*105-1:0] sl_in;              // {last, user, data}
+
+  generate
+    for (g = 0; g < N_SLOTS; g = g + 1) begin : g_slot_in
+      localparam integer J = SLOT_SINK[g * 8 +: 8];
+      glidelink_skid #(.W(105)) i_skid (
+        .clk(clk), .rst(rst || slot_rst[g]),
+        .s_valid(snk_valid[J]), .s_ready(snk_ready[J]),
+        .s_data({snk_last[J], snk_user[J * 72 +: 72], snk_data[J * 32 +: 32]}),
+        .m_valid(sl_in_valid[g]), .m_ready(sl_in_ready[g]), .m_data(sl_in[g * 105 +: 105]));
+    end
+  endgenerate
+
+
   glidelink_passthrough i_slot0 (
-    .clk(clk), .rstn(rstn && !slot_flush),
-    .s_axil_awvalid(sl_awvalid), .s_axil_awready(sl_awready), .s_axil_awaddr(sl_awaddr),
-    .s_axil_wvalid(sl_wvalid), .s_axil_wready(sl_wready), .s_axil_wdata(sl_wdata),
-    .s_axil_bvalid(sl_bvalid), .s_axil_bready(sl_bready),
-    .s_axil_arvalid(sl_arvalid), .s_axil_arready(sl_arready), .s_axil_araddr(sl_araddr),
-    .s_axil_rvalid(sl_rvalid), .s_axil_rready(sl_rready), .s_axil_rdata(sl_rdata),
-    .s_axis_tvalid(snk_valid[2]), .s_axis_tready(snk_ready[2]), .s_axis_tdata(snk_data[64 +: 32]),
-    .s_axis_tuser(snk_user[144 +: 72]), .s_axis_tlast(snk_last[2]),
+    .clk(clk), .rstn(rstn), .flush(slot_rst[0]),
+    .s_axil_awvalid(sl_awvalid[0]), .s_axil_awready(sl_awready[0]), .s_axil_awaddr(sl_awaddr[0 +: 12]),
+    .s_axil_wvalid(sl_wvalid[0]), .s_axil_wready(sl_wready[0]), .s_axil_wdata(sl_wdata[0 +: 32]),
+    .s_axil_bvalid(sl_bvalid[0]), .s_axil_bready(sl_bready[0]),
+    .s_axil_arvalid(sl_arvalid[0]), .s_axil_arready(sl_arready[0]), .s_axil_araddr(sl_araddr[0 +: 12]),
+    .s_axil_rvalid(sl_rvalid[0]), .s_axil_rready(sl_rready[0]), .s_axil_rdata(sl_rdata[0 +: 32]),
+    .s_axis_tvalid(sl_in_valid[0]), .s_axis_tready(sl_in_ready[0]), .s_axis_tdata(sl_in[0 * 105 +: 32]),
+    .s_axis_tuser(sl_in[0 * 105 + 32 +: 72]), .s_axis_tlast(sl_in[0 * 105 + 104]),
     .m_axis_tvalid(src_valid[2]), .m_axis_tready(src_ready[2]), .m_axis_tdata(src_data[64 +: 32]),
     .m_axis_tuser(src_user[144 +: 72]), .m_axis_tlast(src_last[2]));
 
+  glidelink_nco i_slot1 (
+    .clk(clk), .rstn(rstn), .flush(slot_rst[1]),
+    .s_axil_awvalid(sl_awvalid[1]), .s_axil_awready(sl_awready[1]), .s_axil_awaddr(sl_awaddr[12 +: 12]),
+    .s_axil_wvalid(sl_wvalid[1]), .s_axil_wready(sl_wready[1]), .s_axil_wdata(sl_wdata[32 +: 32]),
+    .s_axil_bvalid(sl_bvalid[1]), .s_axil_bready(sl_bready[1]),
+    .s_axil_arvalid(sl_arvalid[1]), .s_axil_arready(sl_arready[1]), .s_axil_araddr(sl_araddr[12 +: 12]),
+    .s_axil_rvalid(sl_rvalid[1]), .s_axil_rready(sl_rready[1]), .s_axil_rdata(sl_rdata[32 +: 32]),
+    .s_axis_tvalid(sl_in_valid[1]), .s_axis_tready(sl_in_ready[1]), .s_axis_tdata(sl_in[1 * 105 +: 32]),
+    .s_axis_tuser(sl_in[1 * 105 + 32 +: 72]), .s_axis_tlast(sl_in[1 * 105 + 104]),
+    .m_axis_tvalid(src_valid[4]), .m_axis_tready(src_ready[4]), .m_axis_tdata(src_data[128 +: 32]),
+    .m_axis_tuser(src_user[288 +: 72]), .m_axis_tlast(src_last[4]));
+
+  glidelink_fir #(.TAPS(32)) i_slot2 (
+    .clk(clk), .rstn(rstn), .flush(slot_rst[2]),
+    .s_axil_awvalid(sl_awvalid[2]), .s_axil_awready(sl_awready[2]), .s_axil_awaddr(sl_awaddr[24 +: 12]),
+    .s_axil_wvalid(sl_wvalid[2]), .s_axil_wready(sl_wready[2]), .s_axil_wdata(sl_wdata[64 +: 32]),
+    .s_axil_bvalid(sl_bvalid[2]), .s_axil_bready(sl_bready[2]),
+    .s_axil_arvalid(sl_arvalid[2]), .s_axil_arready(sl_arready[2]), .s_axil_araddr(sl_araddr[24 +: 12]),
+    .s_axil_rvalid(sl_rvalid[2]), .s_axil_rready(sl_rready[2]), .s_axil_rdata(sl_rdata[64 +: 32]),
+    .s_axis_tvalid(sl_in_valid[2]), .s_axis_tready(sl_in_ready[2]), .s_axis_tdata(sl_in[2 * 105 +: 32]),
+    .s_axis_tuser(sl_in[2 * 105 + 32 +: 72]), .s_axis_tlast(sl_in[2 * 105 + 104]),
+    .m_axis_tvalid(src_valid[5]), .m_axis_tready(src_ready[5]), .m_axis_tdata(src_data[160 +: 32]),
+    .m_axis_tuser(src_user[360 +: 72]), .m_axis_tlast(src_last[5]));
+
   glidelink_switch #(.N_SRC(N_SRC), .N_SNK(N_SNK)) i_switch (
     .clk(clk), .rst(rst), .route(route),
-    .abort_snk({rx1_flush, slot_flush, rx_flush, tx_flush}), .abort_src({tx1_flush, slot_flush, tx_flush, 1'b0}),
+    .abort_snk({slot_rst[2:1], rx1_flush, slot_rst[0], rx_flush, tx_flush}),
+    .abort_src({slot_rst[2:1], tx1_flush, slot_rst[0], tx_flush, 1'b0}),
     .s_valid(src_valid), .s_ready(src_ready), .s_data(src_data), .s_user(src_user), .s_last(src_last),
     .m_valid(snk_valid), .m_ready(snk_ready), .m_data(snk_data), .m_user(snk_user), .m_last(snk_last));
 

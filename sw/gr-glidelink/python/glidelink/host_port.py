@@ -15,6 +15,11 @@ the last sample of a packet that ends a burst; an overflow (packets dropped
 because the reader fell behind) is logged and followed by a new "rx_time".
 The sink sends a packet per work call, timed where a "tx_time" tag starts it
 and ending the burst where a "tx_eob" tag is.
+
+Over the network (uri=ip:...), a read that finds no data for the libiio timeout
+(1 s) drops the connection to the board's iiod (libiio 0.23's network backend
+cannot resume after a timeout): the source then logs it and ends (WORK_DONE),
+as it also does on any other stream error, so the flowgraph can finish.
 """
 import numpy as np
 import pmt
@@ -81,7 +86,8 @@ class host_source(gr.sync_block):
             self.timed = True
             return 0
         if r.ret < 0:
-            raise RuntimeError(f"GlideLink Host Source: readStream error {r.ret}")
+            gr.log.error(f"GlideLink Host Source: readStream error {r.ret}, the stream ends")
+            return -1                   # WORK_DONE
         start = self.nitems_written(0)
         if self.timed and r.flags & SOAPY_SDR_HAS_TIME:
             self.add_item_tag(0, start, pmt.intern("rx_time"), _time_pmt(r.timeNs))
@@ -134,5 +140,6 @@ class host_sink(gr.sync_block):
         if r.ret == SOAPY_SDR_TIMEOUT:
             return 0
         if r.ret < 0:
-            raise RuntimeError(f"GlideLink Host Sink: writeStream error {r.ret}")
+            gr.log.error(f"GlideLink Host Sink: writeStream error {r.ret}, the stream ends")
+            return -1                   # WORK_DONE
         return r.ret

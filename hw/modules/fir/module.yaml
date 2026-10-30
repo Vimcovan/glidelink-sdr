@@ -1,0 +1,40 @@
+# GlideLink user module description (docs/design.md 5.3)
+id: fir
+name: FIR filter
+rtl: glidelink_fir.v
+top: glidelink_fir
+model: model.py
+id_value: 0x46495231          # "FIR1", register ID
+version: 1.0.0
+parameters:
+  TAPS: 32
+data:
+  input: sc16
+  output: sc16
+  latency_cycles: 5
+  tuser: passed with its sample
+function: >-
+  y[n] = sum h[k] x[n-k] on I and Q (real coefficients, 40-bit accumulation), then
+  (y + 2^(SHIFT-1)) >> SHIFT saturated to 16 bits. The delay line runs on across
+  packets; disabled samples pass unchanged and do not enter it.
+registers:
+  - {name: ID, offset: 0x000, access: ro}
+  - {name: VERSION, offset: 0x004, access: ro}
+  - name: CONTROL
+    offset: 0x008
+    access: rw
+    default: 0
+    fields:
+      - {name: enable, bits: 0, doc: "1 = filter, 0 = pass unchanged"}
+      - {name: soft_reset, bits: 1, doc: "self-clearing: pipeline and delay line cleared"}
+      - {name: load, bits: 2, doc: "self-clearing: shadow coefficients become active"}
+  - {name: STATUS, offset: 0x00C, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: TAPS, offset: 0x010, access: ro}
+  - {name: SHIFT, offset: 0x014, access: rw, default: 15, doc: "output right shift, 0..31"}
+  - {name: COEF_ADDR, offset: 0x018, access: rw, default: 0, doc: "shadow index of the next COEF_DATA access"}
+  - {name: COEF_DATA, offset: 0x01C, access: rw, doc: "shadow coefficient [15:0]; a write moves COEF_ADDR on by one"}
+resources:                    # in the shell, xczu5eg, Vivado 2025.2
+  lut: 712
+  ff: 843
+  dsp: 64
+  bram36: 0

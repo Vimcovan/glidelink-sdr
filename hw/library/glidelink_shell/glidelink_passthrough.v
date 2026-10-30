@@ -6,7 +6,8 @@
 //   0x000  ID       RO  0x50535448 ("PSTH")
 //   0x004  VERSION  RO  {major[15:0], minor[7:0], patch[7:0]}
 //   0x008  CONTROL  RW  bit 0: enable (default 1; disabled = input dropped),
-//                       bit 1: soft reset (self-clearing; clears the counters)
+//                       bit 1: soft reset (self-clearing; clears the counters
+//                       and empties the buffer, as flush from the shell does)
 //   0x00C  STATUS   RO  bit 0: enabled
 //   0x010  PACKETS  RO  packets passed (tlast beats)
 //   0x014  BEATS    RO  beats passed
@@ -19,6 +20,7 @@
 module glidelink_passthrough (
   input             clk,
   input             rstn,
+  input             flush,                  // stream state only (PORT_RESET): registers kept
 
   input             s_axil_awvalid,
   output            s_axil_awready,
@@ -111,7 +113,7 @@ module glidelink_passthrough (
   // ---------------------------------------------------------------------------
   // stream: skid buffer (main register + one spare)
 
-  wire        rst = !rstn || soft_rst;
+  wire        rst = !rstn || soft_rst || flush;
   reg  [104:0] main = 105'd0, spare = 105'd0;     // {last, user, data}
   reg         main_v = 1'b0, spare_v = 1'b0;
 

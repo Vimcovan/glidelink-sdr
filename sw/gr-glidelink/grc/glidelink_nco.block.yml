@@ -1,0 +1,37 @@
+id: glidelink_nco
+label: GlideLink NCO (PL)
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: args
+    label: Device arguments
+    dtype: string
+    default: 'driver=glidelink'
+-   id: slot
+    label: Slot
+    dtype: int
+    default: '1'
+-   id: samp_rate
+    label: Sample rate
+    dtype: real
+    default: samp_rate
+-   id: freq
+    label: Frequency shift (Hz)
+    dtype: real
+    default: '0'
+-   id: phase
+    label: Start phase (turns)
+    dtype: real
+    default: '0'
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.nco(${args}, ${slot}, ${samp_rate}, ${freq}, ${phase})
+    callbacks:
+    - set_freq(${freq})
+
+documentation: |-
+    Proxy for the NCO mixer in a PL slot: writes its registers (FREQ, PHASE, CONTROL) and passes no data. Route the data through the slot with GlideLink Control, e.g. {'slot1_in': 'host1_tx', 'host1_rx': 'slot1_out'} with the host port source / sink, or {'slot1_in': 'rf_rx', 'host0_rx': 'slot1_out'} in front of the Soapy source.
+
+file_format: 1

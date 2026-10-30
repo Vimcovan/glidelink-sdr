@@ -128,7 +128,7 @@ module tb_shell3;
   initial begin
     #100 aresetn = 1; rstn = 1; l_rst = 0;
     axi_read(16'h008, v);
-    if (v != 32'h01020201) begin $display("ERROR: CAPS %h", v); errors = errors + 1; end
+    if (v != 32'h03020201) begin $display("ERROR: CAPS %h", v); errors = errors + 1; end
     axi_write(16'h1008, 32'd3);                    // slot 0 in  <- host 1 TX
     axi_write(16'h100C, 32'd2);                    // host 1 RX  <- slot 0 out
     run = 2'b11;

@@ -19,7 +19,15 @@ add_subdirectory(bindings)
 ########################################################################
 # Install python sources
 ########################################################################
-gr_python_install(FILES __init__.py control.py host_port.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink)
+gr_python_install(FILES __init__.py control.py host_port.py modules.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink)
+
+# the user modules' reference models and descriptions (hw/modules), used by modules.py
+set(HW_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/../../../../hw/modules)
+install(FILES ${HW_MODULES}/sc16.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink/modules)
+foreach(m nco fir)
+    install(FILES ${HW_MODULES}/${m}/model.py ${HW_MODULES}/${m}/module.yaml
+            DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink/modules/${m})
+endforeach()
 
 ########################################################################
 # Handle the unit tests

@@ -30,7 +30,7 @@ SoapySDR 模块，经 libiio 访问 ADI 的 ad9361 / cf_axi_adc / cf_axi_dds 驱
   - 外壳 1.1 起默认走包头（流参数 `headers=false` 关闭）：`readStream` 给出 `timeNs`，包头中的丢包标志变为 `SOAPY_SDR_OVERFLOW`，
     读完带“突发结束”标志的包时给出 `SOAPY_SDR_END_BURST`（外壳 1.3 起）；`writeStream` 每次调用为一个包，带 `SOAPY_SDR_HAS_TIME`
     定时发送，`SOAPY_SDR_END_BURST` 结束突发。包头模式下主机 RX 端口在 DMA 来不及收时整包丢弃，不反压上游。
-  - 启动流时先清理端口（`PORT_RESET`；主机端口 1 连同与它直接相连的槽位），接收流在 DMA 缓冲建好后才打开 RX 流化；停止时恢复原始模式。
+  - 启动流时先清理端口（`PORT_RESET`），连同沿路由串在该端口上的槽位（RX 往上游、TX 往下游；槽位清理只清数据通路，寄存器保留），接收流在 DMA 缓冲建好后才打开 RX 流化；停止时恢复原始模式。
     用户设好的路由保留，主机端口 0 的路由为空时接回射频。
 - 时间：`getHardwareTime` / `setHardwareTime` 为外壳的采样计数器，按当前采样率换算为纳秒。
 - 采样率上限 50 MSPS（第三方子卡的 TX 接口余量，见 `hw/README.md`）。

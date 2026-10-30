@@ -1,0 +1,39 @@
+id: glidelink_nco_model
+label: GlideLink NCO (software)
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: samp_rate
+    label: Sample rate
+    dtype: real
+    default: samp_rate
+-   id: freq
+    label: Frequency shift (Hz)
+    dtype: real
+    default: '0'
+-   id: phase
+    label: Start phase (turns)
+    dtype: real
+    default: '0'
+
+inputs:
+-   domain: stream
+    dtype: complex
+
+outputs:
+-   domain: stream
+    dtype: complex
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.nco_model(${samp_rate}, ${freq}, ${phase})
+    callbacks:
+    - set_freq(${freq})
+
+documentation: |-
+    Frequency shift by the reference model of the GlideLink NCO module (hw/modules/nco): bit-exact with the module in PL slot 1. Samples are sc16 scaled to 1.0 (rounded and saturated on the way in).
+
+    In the PL the same block is GlideLink NCO (PL) with the data routed through slot 1.
+
+file_format: 1
