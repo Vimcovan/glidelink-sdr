@@ -13,7 +13,7 @@
  * - the bus is "simple-pm-bus": nodes added by an overlay under a plain
  *   "simple-bus" get no devices in 6.6 (the driver assumes the boot-time
  *   population already did it); build_dtbo.sh makes ADI's /clocks node (the
- *   40 MHz fixed-clock ad9361_clkin) one as well;
+ *   40 MHz ad9361_clkin, made an adjustable-clock there) one as well;
  * - no dma-coherent: PYNQ's boot configuration does not set up HPC port
  *   coherency, so the kernel does the cache maintenance.
  *

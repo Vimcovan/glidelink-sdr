@@ -24,6 +24,31 @@ run('D:/ClaudePrj/glidelink-sdr/sw/matlab/examples/qpsk_ota.m')     % 两块板�
 2026-10-30 `run_all` 各体制均 0 误码（QPSK 440 kbit，2-FSK 27 kbit，CSS 768 个符号，OFDM 60 包 / 480 kbit、
 信噪比 27.6 dB，突发 20 个全收到、间隔离散 2 ns）。
 
+## MathWorks 官方例程（`sw/matlab/examples/official`）
+
+USRP、ADALM-Pluto 支持包和 WLAN 工具箱的官方例程，保留例程的参数和信号处理流程，只把射频收发换成
+`glidelink.Radio`。官方文件不放进仓库：脚本运行时由 `glidelink.officialExample` 从本机已安装的支持包取出，
+放在 `sw/matlab/official/`（不入库）并加入路径。需要先安装 Communications Toolbox Support Package for
+USRP Radio 和 for Analog Devices ADALM-Pluto Radio。
+
+| 脚本 | 官方例程 | 用到的官方部分 | 与原例程的差别 | 2026-10-31 结果 |
+|---|---|---|---|---|
+| `official_qpsk.m` | QPSK Transmitter / Receiver with USRP Hardware、with ADALM-PLUTO Radio | 参数脚本、`QPSKTransmitter`、`QPSKReceiver`（AGC、根升余弦、粗/细频偏、Gardner 定时、帧同步、解扰、误码统计） | `variant` 选 USRP 或 Pluto 的参数；Pluto 版符号率 0.2→0.5 MBd（我们的采样率下限 0.52 MSPS）；发射端在板上循环发送 3 帧（扰码周期） | 两版各 178 帧、136 万比特，0 误码 |
+| `official_freq_correction.m` | Frequency Correction for ADALM-PLUTO Radio | 三个单音、80 kHz 单音估计 ppm、校正值的叠加公式 | Pluto 的 `FrequencyCorrection` 换成 AD9361 驱动的 `xo_correction`；1 MSPS（原 200 kSPS） | 板间 −0.85 ppm，校正后残差约 10 Hz；发射端 +1 ppm 后重新估计，残差约 10 Hz |
+| `official_fm.m` | FM Demodulation and Spectrum Analysis with USRP Radio | 宽带频谱与峰值、`comm.FMBroadcastDemodulator`（立体声） | 宽带中心 90 MHz（日本波段）；窄带 960 kSPS；`source = "boards"` 时由发射板在 915 MHz 发调频立体声广播 | 板间：导频 36 dB，左声道信噪比约 25 dB（无射频回环 41.6 dB），左右隔离 43 dB；空中只收到弱台 |
+| `official_wlan_image.m` | Image Transmission and Reception Using 802.11 Waveform and SDR | 同样的步骤和 WLAN 工具箱函数（MAC 分片、802.11a MCS 6、检测、同步、信道估计、L-SIG、解调、FCS），`helperInterpretLSIG` | 用整段采集里每个分片 FCS 正确的那一份（原例程遇到第一个重复序号即停）；跳过其他 WLAN 的帧 | 2432 MHz：3 次中 2 次 11 包全收、BER 0、EVM 约 6 %；另一次 7 包（WiFi 干扰） |
+| `official_wlan_beacons.m` | WLAN Beacon Receiver Using Software-Defined Radio | `recoverDSSSBits` / `recoverOFDMBits`、`wlanMPDUDecode`、按主信道去重 | 每信道采 3 个信标间隔（原 1 个）；不查厂商 | 见下 |
+
+移植时发现的平台问题与处理：
+
+- 接收板的发射本振与接收本振同频时会漏进接收通道，在 −0.6 kHz 处形成一根约 −53 dBFS 的谱线（与载频无关）。
+  只接收的脚本把接收板的发射本振移开（`TxFreq` 设为接收频率 +10 MHz 以上）。
+- 参考时钟原先在设备树里是固定时钟，写 `xo_correction` 不起作用；已改为与 Pluto 相同的可调时钟（±200 ppm，
+  `hw/dts/build_dtbo.sh`），两块板已更新。
+- Pluto 支持包可以直接按 `ip:` 地址连接我们的板子（只提示固件版本未知），但板上 iiod（0.23）经网络读数据时，
+  开始后的第 5～7 个缓冲块全为零（板上本地读没有此问题），会把例程的 AGC 推到最大。另外 Pluto 支持包按 12 位
+  数据换算，我们的数据是 16 位高位对齐，读数大 16 倍。桥接服务不经过 iiod，不受影响。
+
 ## 各波形的 AGC 配置
 
 每个体制脚本都带有针对其波形的 AGC 配置（`agcMode`、`agcParams`，每个取值的理由写在注释里）。运行脚本前
