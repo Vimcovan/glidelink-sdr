@@ -18,6 +18,7 @@ run('D:/ClaudePrj/glidelink-sdr/sw/matlab/examples/qpsk_ota.m')     % QPSK betwe
 | `css_chirp.m` | chirp spread spectrum SF7, 125 kHz, 1 MSPS | constant envelope, spread spectrum; spectrogram of the chirps |
 | `wlan_ofdm.m` | 802.11a/g 16-QAM 3/4, 20 MSPS (WLAN Toolbox) | wideband, high PAPR (10 dB), packets with idle time; channel estimate |
 | `timed_bursts.m` | 20 Zadoff-Chu bursts at exact hardware times, 2 MSPS | bursts scheduled ahead; spacing precision (ns), clock offset (ppm) |
+| `agc_modes.m` | the same bursts (14 dB steps) with fixed gain, slow AGC, fast AGC, fast AGC with another lock level | how each gain mode reacts (driver parameters as they are; the fast AGC's parameters are listed in the script) |
 | `run_all.m` | all of the above, one after the other | summary table |
 
 On 2026-10-30 `run_all` gave 0 bit errors in every scheme (QPSK 440 kbit, 2-FSK 27 kbit, CSS 768
@@ -33,7 +34,7 @@ symbols, OFDM 60 packets / 480 kbit at SNR 27.6 dB, bursts 20 of 20 with 2 ns sp
 | `t = r.txBurst(x, 0.1)` / `r.txBurst(x, [], t)` | one burst at hardware time now + 0.1 s (or at t, ns), ended as a burst; returns once queued, so many bursts can be scheduled ahead (the bridge sends them in order) |
 | `[y, t] = r.rx(n)` | n contiguous samples (complex, full scale 1), captured on the board, then sent; t = hardware time of the first sample (ns) |
 | `t = r.time()` | hardware time (sample clock), ns |
-| `v = r.attr(name)` / `r.attr(name, value)` | any AD9361 driver attribute: sysfs (`"in_voltage0_rssi"`, ...) or the driver's parameters (`"adi,agc-inner-thresh-high"`, ...; `r.attr("initialize", 1)` re-runs the driver's setup with them) |
+| `v = r.attr(name)` / `r.attr(name, value)` | any AD9361 driver attribute: sysfs (`"in_voltage0_rssi"`, ...) or the driver's parameters (`"adi,agc-inner-thresh-high"`, ...; `r.attr("initialize", 1)` re-runs the driver's setup with them; the bridge keeps rate, LOs, bandwidth, gain mode / gain and TX attenuation across it unless their own device-tree parameter was written). Driver parameters stay set until changed again or the board reboots |
 | `r.route(struct("slot0_in", "host1_tx", "host1_rx", "slot0_out"))` | stream switch routes, sink <- source |
 | `w = r.host1(words, m)` | uint32 words to host port 1 (into the routed modules), m words back |
 | `v = r.reg("FPGA", addr)` / `r.reg("FPGA", addr, value)` | shell and module registers (`"AD9361"`: chip registers) |

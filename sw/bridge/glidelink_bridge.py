@@ -24,7 +24,9 @@ Soapy); host port 1 data are 32-bit words.
   {"cmd": "attr", "name": n, "value": v (omit to read)}   -> {"value": ..}: any attribute of the
                                          AD9361 driver: sysfs (e.g. "in_voltage0_rssi") or debugfs
                                          ("adi,agc-inner-thresh-high", ..., "initialize" = 1 re-runs
-                                         the driver's setup with them)
+                                         the driver's setup with them; rate, LOs, bandwidth, gain
+                                         mode / gain and TX attenuation are kept, unless their own
+                                         device-tree parameter was written)
   {"cmd": "tx_cyclic", "bytes": n} + n bytes CS16      -> repeat the waveform until tx_stop
   {"cmd": "tx_stop"}
   {"cmd": "tx_burst", "bytes": n, "delay": s} + CS16   -> one burst at hardware time now + s (or
@@ -108,6 +110,7 @@ class Bridge:
         self.routes({"host0_rx": "rf_rx", "rf_tx": "host0_tx"})
         self.dev = SoapySDR.Device(a.args)
         self.tx_thread, self.tx_run, self.tx_owner, self.burst = None, False, None, None
+        self.dt_written = set()                          # device-tree parameters written since the last setup
         self.lock = threading.Lock()
 
     # ------------------------------------------------------------------ helpers
@@ -175,6 +178,28 @@ class Bridge:
                 with open(path, "w") as f:
                     f.write(str(value))
             return open(path).read().strip()
+        if name == "initialize" and value is not None and int(value):
+            # the driver's setup puts rate, LOs, bandwidths, gain mode and gains back to the device
+            # tree values: keep the current ones, except those whose device-tree parameter the
+            # client has written since the last setup (as the Soapy module does, phase 2 E2)
+            keep = self.settings()
+            restore = {"rate": keep["rate"]}
+            for key, dt in (("rx_freq", "adi,rx-synthesizer-frequency-hz"),
+                            ("tx_freq", "adi,tx-synthesizer-frequency-hz"),
+                            ("bandwidth", "adi,rf-rx-bandwidth-hz"),
+                            ("rx_gain_mode", "adi,gc-rx1-mode"),
+                            ("tx_atten", "adi,tx-attenuation-mdB")):
+                if dt not in self.dt_written:
+                    restore[key] = keep[key]
+            if keep["rx_gain_mode"] == "manual" and "adi,gc-rx1-mode" not in self.dt_written:
+                restore["rx_gain"] = keep["rx_gain"]
+                del restore["rx_gain_mode"]
+            out = timed(acc, 30.0)
+            self.dt_written.clear()
+            self.config(restore)
+            return out
+        if name.startswith("adi,") and value is not None:
+            self.dt_written.add(name)
         return timed(acc, 15.0)
 
     # ------------------------------------------------------------------ streams
