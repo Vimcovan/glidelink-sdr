@@ -1,0 +1,23 @@
+# GlideLink offline daemon (sw/offline/glidelinkd.py) for the board configuration %i
+# (sw/offline/config/%i.yaml): loads the image, sets up the AD9361, modules and routes, then runs
+# the AGC watchdog and writes /run/glidelink/status.json.
+# The competition services load their own overlay: they cannot run at the same time.
+[Unit]
+Description=GlideLink offline daemon (%i)
+# PYNQ's bootpy.service loads base.bit at boot: load our image after it
+After=network.target systemd-modules-load.service bootpy.service iiod.service
+Conflicts=jscc-tx.service jscc-rx.service jscc-gui.service jscc-web.service
+
+[Service]
+Type=notify
+# READY=1 once the board is up: the application services start after that
+TimeoutStartSec=240
+WorkingDirectory=/home/xilinx/claude/sdr/offline
+ExecStart=/usr/bin/python3 glidelinkd.py config/%i.yaml
+RuntimeDirectory=glidelink
+RuntimeDirectoryPreserve=yes
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+# DeepJSCC-Q transmitter application (sw/offline/jscc_tx_app.py), with glidelinkd@tx.
+# Upheld by glidelinkd@tx (install.sh) and bound to it: when the daemon restarts (and resets
+# the encoder), the application restarts after it, so the encoder, which counts its own image
+# boundaries, starts again at an image boundary.
+# Source: override with a drop-in (systemctl edit jscc-tx-app), e.g. a video or a directory.
+[Unit]
+Description=DeepJSCC-Q TX application
+BindsTo=glidelinkd@tx.service
+After=glidelinkd@tx.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/xilinx/claude/sdr/offline
+Environment=JSCC_TX_SRC=/home/xilinx/claude/tx/media/presets/div2k_0802.png
+ExecStart=/bin/sh -c 'exec /usr/bin/python3 jscc_tx_app.py --src "$JSCC_TX_SRC"'
+Restart=on-failure
+RestartSec=5

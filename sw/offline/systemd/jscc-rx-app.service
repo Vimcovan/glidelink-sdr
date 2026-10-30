@@ -1,0 +1,14 @@
+# DeepJSCC-Q receiver application (sw/offline/jscc_rx_app.py), with glidelinkd@rx.
+# Upheld by glidelinkd@rx (install.sh) and bound to it: when the daemon restarts (and resets
+# the decoder), the application restarts after it.
+[Unit]
+Description=DeepJSCC-Q RX application
+BindsTo=glidelinkd@rx.service
+After=glidelinkd@rx.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/xilinx/claude/sdr/offline
+ExecStart=/usr/bin/python3 jscc_rx_app.py
+Restart=on-failure
+RestartSec=5

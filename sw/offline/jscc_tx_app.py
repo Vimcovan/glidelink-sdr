@@ -11,7 +11,9 @@ host port 1 (raw, 49,152 words) at --fps.
 TCP control (one line per command, one line back), for the PC tools (sw/offline/link_metrics.py):
     time              -> "time <board time>"                      clock offset estimate
     src <path>        -> "ok"                                     switch the source
-    events            -> then one line per frame sent: "frame <n> <t_start> <t_end> <src id>"
+    att <dB>          -> "att <dB set>"                           TX attenuation (AD9361 TX1)
+    events            -> then one line per frame sent: "frame <n> <t_start> <t_end> <src id> <index>"
+                         (index: image number in a directory source, in sorted file order)
 """
 import argparse
 import os
@@ -57,16 +59,18 @@ class Source:
         return square(np.asarray(Image.open(path).convert("RGB")))
 
     def next(self):
+        """(frame, index): the image number in the directory, or the video frame number"""
         if self.video is not None:
             import cv2
             ok, bgr = self.video.read()
             if not ok:
                 self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 ok, bgr = self.video.read()
-            return square(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-        f = self.frames[self.k % len(self.frames)]
+            self.k += 1
+            return square(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)), self.k - 1
+        i = self.k % len(self.frames)
         self.k += 1
-        return f
+        return self.frames[i], i
 
 
 class App:
@@ -90,6 +94,14 @@ class App:
                     with self.lock:
                         self.src = s
                     f.write("ok\n")
+                except Exception as e:                  # noqa: BLE001  (reported to the client)
+                    f.write(f"error {e}\n")
+            elif cmd == "att":
+                try:
+                    from glidelinkd import IioDev
+                    phy = IioDev("ad9361-phy")
+                    phy.attr("out_voltage0_hardwaregain", -float(arg))
+                    f.write(f"att {-float(phy.attr('out_voltage0_hardwaregain').split()[0]):.2f}\n")
                 except Exception as e:                  # noqa: BLE001  (reported to the client)
                     f.write(f"error {e}\n")
             elif cmd == "events":
@@ -116,7 +128,8 @@ class App:
         while True:
             with self.lock:
                 src = self.src
-            words = np.frombuffer(src.next().tobytes(), "<u4")
+            img, idx = src.next()
+            words = np.frombuffer(img.tobytes(), "<u4")
             now = time.time()
             if now < t_next:
                 time.sleep(t_next - now)
@@ -133,7 +146,8 @@ class App:
             with self.lock:
                 for f in list(self.listeners):
                     try:
-                        f.write(f"frame {n} {t0:.6f} {t1:.6f} {src.id}\n")
+                        f.write(f"frame {n} {t0:.6f} {t1:.6f} {src.id} {idx}\n")
+                        f.flush()                       # a socket text file is not line buffered
                     except OSError:
                         self.listeners.remove(f)
             n += 1

@@ -42,6 +42,7 @@ import argparse
 import collections
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -60,6 +61,16 @@ SLOT_BASE = lambda k: 0x2000 + 0x1000 * k               # slot k register window
 
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+def sd_notify(msg):
+    """systemd readiness (Type=notify): the application services start after READY=1"""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if addr:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        s.connect("\0" + addr[1:] if addr.startswith("@") else addr)
+        s.sendall(msg.encode())
+        s.close()
 
 
 class Hung(Exception):
@@ -223,6 +234,10 @@ class Daemon:
 
     # ------------------------------------------------------------------ run
     def run(self, once=False):
+        st = self.cfg.get("status") or {}
+        out = st.get("path", "/run/glidelink/status.json")
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        json.dump(self.status, open(out, "w"))          # "starting": the applications wait for "running"
         self.overlay()
         self.phy, self.shell = IioDev("ad9361-phy"), IioDev("glidelink-shell")
         self.status["shell_version"] = f"{self.shell.reg(0x004):08X}"
@@ -231,9 +246,7 @@ class Daemon:
         self.routes()
         self.status["state"] = "running"
         log("up")
-        st = self.cfg.get("status") or {}
-        out = st.get("path", "/run/glidelink/status.json")
-        os.makedirs(os.path.dirname(out), exist_ok=True)
+        sd_notify("READY=1")
         counters = {n: (int(s), int(o)) for n, (s, o) in (st.get("counters") or {}).items()}
         wd = self.cfg.get("watchdog")
         poll = float(st.get("poll_s", 0.1))
