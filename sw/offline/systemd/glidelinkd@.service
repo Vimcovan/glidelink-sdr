@@ -6,7 +6,7 @@
 Description=GlideLink offline daemon (%i)
 # PYNQ's bootpy.service loads base.bit at boot: load our image after it
 After=network.target systemd-modules-load.service bootpy.service iiod.service
-Conflicts=jscc-tx.service jscc-rx.service jscc-gui.service jscc-web.service
+Conflicts=jscc-tx.service jscc-rx.service jscc-gui.service jscc-web.service glidelink-bridge.service
 
 [Service]
 Type=notify

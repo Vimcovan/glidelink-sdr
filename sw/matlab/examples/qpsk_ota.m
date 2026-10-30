@@ -1,6 +1,5 @@
 %QPSK_OTA QPSK over the air between the two GlideLink boards, from MATLAB (docs/matlab_plan.md, Q2).
 %
-% 2.5 MSPS: below 2.08 MSPS the AD9361 driver needs its own FIR setup.
 % Needs: the bridge on both boards (sw/bridge/glidelink_bridge.py; the offline services stopped),
 % any image (it routes the RF through host port 0). Communications Toolbox.
 %
@@ -10,7 +9,7 @@
 % search on the preamble (also resolves the 90-degree ambiguity) -> bit errors and EVM.
 
 txHost = "192.168.4.1";  rxHost = "192.168.3.1";
-fs = 2.5e6;  fc = 915e6;  sps = 4;  beta = 0.35;  span = 10;
+fs = 1e6;  fc = 915e6;  sps = 4;  beta = 0.35;  span = 10;
 txAtten = 30;                                    % dB: try 10 .. 60
 rxGain = 40;                                     % dB, fixed (an AGC changing the gain during the
                                                  % capture spreads the points along the radius)

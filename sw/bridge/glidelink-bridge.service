@@ -1,0 +1,18 @@
+# GlideLink bridge (sw/bridge/glidelink_bridge.py): the board for MATLAB and other TCP clients,
+# port 7030. Loads the image of /etc/default/glidelink-bridge (GLIDELINK_IMAGE) when no overlay is
+# applied. Exclusive with the offline system and the competition services (they own the routes).
+[Unit]
+Description=GlideLink bridge (TCP 7030)
+After=network.target systemd-modules-load.service bootpy.service iiod.service
+Conflicts=glidelinkd@tx.service glidelinkd@rx.service jscc-tx.service jscc-rx.service jscc-gui.service jscc-web.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/glidelink-bridge
+WorkingDirectory=/home/xilinx/claude/sdr/bridge
+ExecStart=/bin/sh -c 'exec /usr/bin/python3 glidelink_bridge.py --image "$GLIDELINK_IMAGE"'
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

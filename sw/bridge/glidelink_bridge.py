@@ -1,28 +1,41 @@
 #!/usr/bin/env python3
 """GlideLink bridge (docs/matlab_plan.md): the board's radio, shell and host port 1 over TCP, for
-MATLAB (sw/matlab/+glidelink) or any client with sockets and JSON.
+MATLAB (sw/matlab/+glidelink) or any client with sockets and JSON. A fixed service: scripts use its
+commands, they never need to change it.
 
-    python3 glidelink_bridge.py [--port 7030]
+    python3 glidelink_bridge.py [--port 7030] [--image <bit file>]
 
-Runs on the board, instead of the offline services (glidelinkd@*, which own the routes): stop them
-first, or use the glidelink-bridge service (Conflicts=). Several clients may be connected; their
-commands run one at a time.
+Started by the glidelink-bridge service (sw/bridge/install.sh). Without an overlay loaded it loads
+--image first (load_overlay.sh). It cannot run together with the offline services (glidelinkd@*,
+which own the routes; the service units conflict). Several clients may be connected; their commands
+run one at a time.
 
-Protocol: each request is one line of JSON, each reply one line of JSON; sample data follow a
-line that gives their length in "bytes". Samples are CS16 (int16 I, Q interleaved, 12-bit full
-scale = 2048, as Soapy); host port 1 data are 32-bit words.
+Protocol (version PROTOCOL): each request is one line of JSON, each reply one line of JSON with
+"ok" (and "error" when false); data follow a reply line that gives their length in "bytes", and
+a request line likewise. Samples are CS16 (int16 I, Q interleaved, 12-bit full scale = 2048, as
+Soapy); host port 1 data are 32-bit words.
 
-  {"cmd": "info"}                                      -> driver, shell version, current settings
+  {"cmd": "info"}                     -> protocol, shell version, image, current settings
   {"cmd": "config", "rate": 1e6, "freq": 915e6, "rx_freq": .., "tx_freq": .., "bandwidth": 1e6,
-   "rx_gain_mode": "slow_attack" | "fast_attack" | "manual", "rx_gain": 40, "tx_atten": 20,
-   "loopback": 0 | 1}                                  -> the settings as read back
+   "rx_gain_mode": "slow_attack" | "fast_attack" | "hybrid" | "manual", "rx_gain": 40,
+   "tx_atten": 20, "loopback": 0 | 1}  -> the settings as read back. Any rate from 0.52 to 61.44 MSPS
+                                         (libad9361 designs the FIR); keys given are applied in this
+                                         order, the others are left as they are
+  {"cmd": "attr", "name": n, "value": v (omit to read)}   -> {"value": ..}: any attribute of the
+                                         AD9361 driver: sysfs (e.g. "in_voltage0_rssi") or debugfs
+                                         ("adi,agc-inner-thresh-high", ..., "initialize" = 1 re-runs
+                                         the driver's setup with them)
   {"cmd": "tx_cyclic", "bytes": n} + n bytes CS16      -> repeat the waveform until tx_stop
   {"cmd": "tx_stop"}
-  {"cmd": "rx", "n": N}                                -> {"bytes": 4N} + N contiguous CS16 samples
-                                                          (read on the board first, then sent)
+  {"cmd": "tx_burst", "bytes": n, "delay": s} + CS16   -> one burst, sent at hardware time now + s
+                                                          (or "time": ns), ended (end of burst)
+  {"cmd": "time"}                     -> {"time": ns}: the shell's hardware time (sample clock)
+  {"cmd": "rx", "n": N}               -> {"bytes": 4N} + N contiguous CS16 samples (read on the
+                                         board first, then sent); {"time": ns} of the first sample
   {"cmd": "host1", "n_out": M, "bytes": n} + n bytes   -> words through host port 1 (routes as set):
                                                           {"bytes": 4M} + M words back
-  {"cmd": "route", "routes": {"slot0_in": "host1_tx", ...}}   sink: source (gr-glidelink names)
+  {"cmd": "route", "routes": {"slot0_in": "host1_tx", ...}}   sink: source (gr-glidelink names);
+                                         a source that fed another sink is taken from it
   {"cmd": "reg", "iface": "FPGA" | "AD9361", "addr": a, "value": v (omit to read)} -> {"value": ..}
 """
 import argparse
@@ -33,20 +46,59 @@ import sys
 import threading
 import time
 
+import ctypes
+import subprocess
+
 import numpy as np
 import SoapySDR
-from SoapySDR import SOAPY_SDR_RX, SOAPY_SDR_TX, SOAPY_SDR_CS16
+from SoapySDR import (SOAPY_SDR_RX, SOAPY_SDR_TX, SOAPY_SDR_CS16, SOAPY_SDR_HAS_TIME,
+                      SOAPY_SDR_END_BURST)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "offline"))
 sys.path.insert(0, "/home/xilinx/claude/sdr/offline")
-from glidelinkd import IioDev, SHELL_ROUTE, SHELL_PORT_RESET, SINKS, SOURCES, SINK_FLUSH  # noqa: E402
+from glidelinkd import IioDev, SHELL_ROUTE, SHELL_PORT_RESET, SINKS, SOURCES, SINK_FLUSH, timed  # noqa: E402
 
 CHUNK = 65536
+PROTOCOL = 1
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_image(bit):
+    """the overlay, unless one is applied (load_overlay.sh next to the image or in sw/offline)"""
+    applied = os.listdir("/sys/kernel/config/device-tree/overlays")
+    if applied:
+        return applied[0]
+    name = os.path.splitext(os.path.basename(bit))[0]
+    loader = next(p for p in (os.path.join(os.path.dirname(bit), "..", "load_overlay.sh"),
+                              os.path.join(HERE, "..", "offline", "load_overlay.sh"),
+                              "/home/xilinx/claude/sdr/load_overlay.sh") if os.path.exists(p))
+    print(f"loading image {name}", flush=True)
+    subprocess.run(["bash", loader, os.path.basename(bit), name + ".dtbo"], cwd=os.path.dirname(bit),
+                   check=True, timeout=180)
+    return name
+
+
+def set_bb_rate(rate):
+    """libad9361: rate with a FIR designed for it (the driver alone refuses rates below 2.08 MSPS)"""
+    iio, lib = ctypes.CDLL("libiio.so.0"), ctypes.CDLL("libad9361.so.0")
+    iio.iio_create_local_context.restype = ctypes.c_void_p
+    iio.iio_context_find_device.restype = ctypes.c_void_p
+    iio.iio_context_find_device.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    iio.iio_context_destroy.argtypes = [ctypes.c_void_p]
+    lib.ad9361_set_bb_rate.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    ctx = iio.iio_create_local_context()
+    try:
+        ret = lib.ad9361_set_bb_rate(iio.iio_context_find_device(ctx, b"ad9361-phy"), int(rate))
+    finally:
+        iio.iio_context_destroy(ctx)
+    if ret < 0:
+        raise RuntimeError(f"ad9361_set_bb_rate({rate:g}): error {ret}")
 
 
 class Bridge:
     def __init__(self, a):
         self.a = a
+        self.image = load_image(a.image)
         self.phy, self.shell = IioDev("ad9361-phy"), IioDev("glidelink-shell")
         self.dds = IioDev("cf-ad9361-dds-core-lpc")
         # the RF through host port 0 in both directions (an offline image routes it elsewhere)
@@ -84,9 +136,7 @@ class Bridge:
     def config(self, r):
         d, p = self.dev, self.phy
         if "rate" in r:
-            p.attr("in_out_voltage_filter_fir_en", 0)   # an offline profile's FIR is for 20 MSPS only
-            d.setSampleRate(SOAPY_SDR_RX, 0, float(r["rate"]))
-            d.setSampleRate(SOAPY_SDR_TX, 0, float(r["rate"]))
+            set_bb_rate(float(r["rate"]))
         for key, direction in (("freq", None), ("rx_freq", SOAPY_SDR_RX), ("tx_freq", SOAPY_SDR_TX)):
             if key in r:
                 for dr in ((SOAPY_SDR_RX, SOAPY_SDR_TX) if direction is None else (direction,)):
@@ -106,6 +156,23 @@ class Bridge:
             dbg = p.dbg + "/loopback"
             open(dbg, "w").write(str(int(r["loopback"])))
         return self.settings()
+
+    def attr(self, name, value=None):
+        """an AD9361 driver attribute: sysfs first, else debugfs (device tree parameters, initialize)"""
+        if "/" in name or name.startswith("."):
+            raise ValueError("attribute name only")
+        path = os.path.join(self.phy.sys, name)
+        if not os.path.exists(path):
+            path = os.path.join(self.phy.dbg, name)
+        if not os.path.exists(path):
+            raise ValueError(f"no attribute {name}")
+
+        def acc():
+            if value is not None:
+                with open(path, "w") as f:
+                    f.write(str(value))
+            return open(path).read().strip()
+        return timed(acc, 15.0)
 
     # ------------------------------------------------------------------ streams
     def tx_cyclic(self, data):
@@ -140,17 +207,44 @@ class Bridge:
             self.tx_thread = None
 
     def rx(self, n):
+        """(n contiguous CS16 samples, hardware time of the first in ns or None)"""
         out = np.empty(2 * n, np.int16)
         s = self.dev.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [0], {"bufferLength": str(CHUNK)})
         self.dev.activateStream(s)
-        got, t0 = 0, time.time()
-        while got < n and time.time() - t0 < 10:
+        got, t0, t_first = 0, time.time(), None
+        while got < n and time.time() - t0 < max(10.0, 2.0 * n / self.dev.getSampleRate(SOAPY_SDR_RX, 0)):
             r = self.dev.readStream(s, [out[2 * got:]], min(CHUNK, n - got), timeoutUs=1000000)
             if r.ret > 0:
+                if got == 0 and r.flags & SOAPY_SDR_HAS_TIME:
+                    t_first = r.timeNs
                 got += r.ret
         self.dev.deactivateStream(s)
         self.dev.closeStream(s)
-        return out[:2 * got].tobytes()
+        return out[:2 * got].tobytes(), t_first
+
+    def tx_burst(self, data, t_ns):
+        if self.tx_thread is not None:
+            raise RuntimeError("cyclic TX running: tx_stop first")
+        iq = np.frombuffer(data, np.int16).copy()
+        n = len(iq) // 2
+        s = self.dev.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, [0], {"bufferLength": str(CHUNK)})
+        self.dev.activateStream(s)
+        for ch in (0x418, 0x458):
+            self.dds.reg(ch, 2)
+        p, flags = 0, SOAPY_SDR_HAS_TIME
+        while p < n:
+            k = min(CHUNK, n - p)
+            r = self.dev.writeStream(s, [iq[2 * p:]], k, flags | (SOAPY_SDR_END_BURST if p + k == n else 0),
+                                     t_ns, timeoutUs=2000000)
+            if r.ret <= 0:
+                break
+            p += r.ret
+            flags = 0                                    # the time applies to the first sample only
+        wait = (t_ns - self.dev.getHardwareTime()) / 1e9 + n / self.dev.getSampleRate(SOAPY_SDR_TX, 0) + 0.05
+        time.sleep(min(max(wait, 0.05), 10.0))           # until the burst has left
+        self.dev.deactivateStream(s)
+        self.dev.closeStream(s)
+        return p
 
     def host1(self, data, n_out):
         args = {"port": "1", "headers": "false", "bufferLength": str(CHUNK)}
@@ -204,8 +298,8 @@ class Bridge:
 
     def command(self, cmd, r, data, reply, who):
         if cmd == "info":
-            reply({"ok": True, "driver": "glidelink", "shell": f"{self.shell.reg(0x004):08X}",
-                   **self.settings()})
+            reply({"ok": True, "protocol": PROTOCOL, "driver": "glidelink", "image": self.image,
+                   "shell": f"{self.shell.reg(0x004):08X}", **self.settings()})
         elif cmd == "config":
             reply({"ok": True, **self.config(r)})
         elif cmd == "tx_cyclic":
@@ -216,7 +310,15 @@ class Bridge:
             self.tx_stop()
             reply({"ok": True})
         elif cmd == "rx":
-            reply({"ok": True}, self.rx(int(r["n"])))
+            data, t = self.rx(int(r["n"]))
+            reply({"ok": True, "time": t}, data)
+        elif cmd == "attr":
+            reply({"ok": True, "value": self.attr(r["name"], r.get("value"))})
+        elif cmd == "time":
+            reply({"ok": True, "time": self.dev.getHardwareTime()})
+        elif cmd == "tx_burst":
+            t = int(r["time"]) if "time" in r else self.dev.getHardwareTime() + int(float(r.get("delay", 0.1)) * 1e9)
+            reply({"ok": True, "samples": self.tx_burst(data, t), "time": t})
         elif cmd == "host1":
             reply({"ok": True}, self.host1(data, int(r["n_out"])))
         elif cmd == "route":
@@ -260,6 +362,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=7030)
     ap.add_argument("--args", default="driver=glidelink")
+    ap.add_argument("--image", default="/home/xilinx/claude/sdr/offline/ovl/glidelink_rx.bit",
+                    help="image loaded when no overlay is applied (with its .dtbo / .hwh next to it)")
     Bridge(ap.parse_args()).serve()
 
 

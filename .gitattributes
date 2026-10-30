@@ -5,3 +5,4 @@ os/kernel/wilc/* text eol=lf
 sw/offline/systemd/* text eol=lf
 sw/offline/profiles/* text eol=lf
 sw/offline/config/* text eol=lf
+sw/bridge/*.service text eol=lf
