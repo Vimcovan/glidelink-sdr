@@ -6,7 +6,8 @@ classdef Radio < handle
     %   r.txCyclic(x);              % complex column, |x| <= 1: repeated on the board
     %   y = r.rx(1e6);              % 1e6 contiguous samples, complex double, full scale 1
     %   r.txStop();
-    %   r.txBurst(x, 0.1);          % one burst 0.1 s from now (hardware time), end of burst
+    %   r.txBurst(x, 0.1);          % one burst 0.1 s from now (hardware time); r.txBurst(x, [], t)
+    %                               % at hardware time t (ns); returns once queued
     %   t = r.time();               % hardware time, ns
     %   v = r.attr("adi,agc-inner-thresh-high", 14);   % any AD9361 driver attribute (sysfs or
     %   r.attr("initialize", 1);                       % debugfs); read with r.attr(name)
@@ -98,13 +99,18 @@ classdef Radio < handle
             y = y(:);
         end
 
-        function t = txBurst(obj, x, delay)
-            %TXBURST Send x once, delay seconds from now (hardware time), ended as a burst.
-            %Returns the hardware time of its first sample (ns).
-            if nargin < 3
+        function t = txBurst(obj, x, delay, at)
+            %TXBURST Queue x as one burst, delay seconds from now (hardware time), or at hardware
+            %time AT (ns) when given; ended as a burst. Returns at once with the burst's time (ns),
+            %so several bursts can be scheduled ahead; txStop cancels those not yet sent.
+            if nargin < 3 || isempty(delay)
                 delay = 0.1;
             end
-            rep = obj.request(struct("cmd", "tx_burst", "delay", delay), glidelink.Radio.toCs16(x));
+            req = struct("cmd", "tx_burst", "delay", delay);
+            if nargin > 3
+                req = struct("cmd", "tx_burst", "time", at);
+            end
+            rep = obj.request(req, glidelink.Radio.toCs16(x));
             t = rep.time;
         end
 
@@ -152,11 +158,12 @@ classdef Radio < handle
         function [rep, data] = request(obj, req, payload)
             if nargin > 2
                 req.bytes = numel(payload);
+            else
+                payload = uint8([]);
             end
-            writeline(obj.T, jsonencode(req));
-            if nargin > 2
-                write(obj.T, payload, "uint8");
-            end
+            % one write for the request line and its data: a second small write would wait for the
+            % acknowledgement of the first (Nagle + delayed ACK, ~40 ms per request)
+            write(obj.T, [uint8([jsonencode(req), newline]), payload(:)'], "uint8");
             rep = jsondecode(char(readline(obj.T)));
             if ~rep.ok
                 error("glidelink:bridge", "%s: %s", obj.Host, rep.error);

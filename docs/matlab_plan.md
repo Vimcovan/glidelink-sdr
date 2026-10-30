@@ -56,3 +56,6 @@ MATLAB 接收端使用 Communications Toolbox 的标准模块：自动增益 →
 | 桥接服务 | `sw/bridge/glidelink_bridge.py`，systemd 服务 `glidelink-bridge`（开机加载本板镜像后启动，与脱机系统互斥）；协议版本 1，命令覆盖射频设置（任意采样率 0.52–61.44 MSPS，由 libad9361 为该速率设计 FIR）、任意驱动属性、循环 / 定时突发发送、连续取样、硬件时间、主机端口 1、路由、寄存器；多个客户端可同时连接，命令依次执行 |
 | MATLAB 包 | `sw/matlab/+glidelink/Radio.m`，只用 MATLAB 自带的 `tcpclient`；连接时检查协议版本；说明见 `sw/matlab/README.md` |
 | Q2 QPSK 空中收发 | `sw/matlab/examples/qpsk_ota.m`：1 MSPS、250 k 符号/s，110 帧 44 万比特误码 0，EVM −23.8 dB；2.5 MSPS 时 292 帧 116.8 万比特误码 0，EVM −27.7 dB；图窗显示频谱、同步前后星座、统计 |
+| 多种通信体制 | 同一个桥接服务、板上不做任何改动，`examples/run_all.m` 依次运行：QPSK（1 MSPS）、2-FSK（窄带恒包络，0.6 MSPS）、线性调频扩频 SF7（1 MSPS）、802.11a/g OFDM 16-QAM（宽带、高 PAPR、按包突发，20 MSPS，WLAN Toolbox）、按硬件时间定时发出的突发（2 MSPS），全部零误码；突发间隔误差标准差 2 ns |
+| 期间修正的桥接服务问题 | 定时发送与带时间戳的接收需要包头模式（原先用的原始模式会忽略时间）；DMA 以 64 位为单位，包头 4 个字加奇数个样点的包发不出去，奇数长度的突发补一个零样点；一个定时突发在发出前一直占着一个 DMA 缓冲区（共 4 个），提前排很多突发会阻塞请求，改为桥接服务内部排队、后台按序送入 |
+

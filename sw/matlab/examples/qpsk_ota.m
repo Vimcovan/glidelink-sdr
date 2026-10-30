@@ -74,6 +74,8 @@ evm = 100 * sqrt(mean(abs(g * zs - ref) .^ 2) / mean(abs(ref) .^ 2));
 ber = nerr / max(nbit, 1);
 fprintf("frames %d, bits %d, errors %d (BER %.2e), EVM %.1f %% (%.1f dB), CFO %+.0f Hz, RX gain %.0f dB\n", ...
     numel(starts), nbit, nerr, ber, evm, 20 * log10(evm / 100), cfo, s.rx_gain);
+result = struct("name", "QPSK single carrier", "frames", numel(starts), "bits", nbit, "errors", nerr, ...
+    "metric", sprintf("EVM %.1f dB, CFO %+.0f Hz", 20 * log10(evm / 100), cfo));
 
 %% figure
 fig = figure(Name="GlideLink QPSK over the air", Color="w", Position=[100 100 1200 800]);

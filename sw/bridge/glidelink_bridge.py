@@ -27,8 +27,10 @@ Soapy); host port 1 data are 32-bit words.
                                          the driver's setup with them)
   {"cmd": "tx_cyclic", "bytes": n} + n bytes CS16      -> repeat the waveform until tx_stop
   {"cmd": "tx_stop"}
-  {"cmd": "tx_burst", "bytes": n, "delay": s} + CS16   -> one burst, sent at hardware time now + s
-                                                          (or "time": ns), ended (end of burst)
+  {"cmd": "tx_burst", "bytes": n, "delay": s} + CS16   -> one burst at hardware time now + s (or
+                                                          "time": ns), ended (end of burst); returns
+                                                          once queued, so bursts can be scheduled
+                                                          ahead; tx_stop cancels what is left
   {"cmd": "time"}                     -> {"time": ns}: the shell's hardware time (sample clock)
   {"cmd": "rx", "n": N}               -> {"bytes": 4N} + N contiguous CS16 samples (read on the
                                          board first, then sent); {"time": ns} of the first sample
@@ -40,6 +42,7 @@ Soapy); host port 1 data are 32-bit words.
 """
 import argparse
 import json
+import queue
 import os
 import socket
 import sys
@@ -104,7 +107,7 @@ class Bridge:
         # the RF through host port 0 in both directions (an offline image routes it elsewhere)
         self.routes({"host0_rx": "rf_rx", "rf_tx": "host0_tx"})
         self.dev = SoapySDR.Device(a.args)
-        self.tx_thread, self.tx_run, self.tx_owner = None, False, None
+        self.tx_thread, self.tx_run, self.tx_owner, self.burst = None, False, None, None
         self.lock = threading.Lock()
 
     # ------------------------------------------------------------------ helpers
@@ -177,6 +180,7 @@ class Bridge:
     # ------------------------------------------------------------------ streams
     def tx_cyclic(self, data):
         self.tx_stop()
+        self.close_burst()
         iq = np.frombuffer(data, np.int16).copy()
         self.tx_run = True
 
@@ -201,6 +205,7 @@ class Bridge:
         self.tx_thread.start()
 
     def tx_stop(self):
+        self.close_burst()
         self.tx_run = False
         if self.tx_thread is not None:
             self.tx_thread.join(5)
@@ -209,7 +214,7 @@ class Bridge:
     def rx(self, n):
         """(n contiguous CS16 samples, hardware time of the first in ns or None)"""
         out = np.empty(2 * n, np.int16)
-        s = self.dev.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [0], {"bufferLength": str(CHUNK)})
+        s = self.dev.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [0], {"bufferLength": str(CHUNK), "headers": "true"})
         self.dev.activateStream(s)
         got, t0, t_first = 0, time.time(), None
         while got < n and time.time() - t0 < max(10.0, 2.0 * n / self.dev.getSampleRate(SOAPY_SDR_RX, 0)):
@@ -223,28 +228,59 @@ class Bridge:
         return out[:2 * got].tobytes(), t_first
 
     def tx_burst(self, data, t_ns):
+        """queues one timed burst and returns at once. A sender thread writes the queue to the TX
+        stream in order: the DMA holds only a few buffers (one per burst) and a timed burst keeps
+        its buffer until it has been sent, so writing from the request would block the client
+        once a few bursts are scheduled ahead. The stream stays open until tx_stop, a cyclic
+        transmission or the client leaves (which cancel what has not been sent)."""
         if self.tx_thread is not None:
             raise RuntimeError("cyclic TX running: tx_stop first")
-        iq = np.frombuffer(data, np.int16).copy()
-        n = len(iq) // 2
-        s = self.dev.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, [0], {"bufferLength": str(CHUNK)})
-        self.dev.activateStream(s)
-        for ch in (0x418, 0x458):
-            self.dds.reg(ch, 2)
-        p, flags = 0, SOAPY_SDR_HAS_TIME
-        while p < n:
-            k = min(CHUNK, n - p)
-            r = self.dev.writeStream(s, [iq[2 * p:]], k, flags | (SOAPY_SDR_END_BURST if p + k == n else 0),
-                                     t_ns, timeoutUs=2000000)
-            if r.ret <= 0:
-                break
-            p += r.ret
-            flags = 0                                    # the time applies to the first sample only
-        wait = (t_ns - self.dev.getHardwareTime()) / 1e9 + n / self.dev.getSampleRate(SOAPY_SDR_TX, 0) + 0.05
-        time.sleep(min(max(wait, 0.05), 10.0))           # until the burst has left
-        self.dev.deactivateStream(s)
-        self.dev.closeStream(s)
-        return p
+        iq = np.frombuffer(data, np.int16)
+        if (len(iq) // 2) % 2:                           # the DMA moves 64-bit words: a packet of
+            iq = np.concatenate([iq, np.zeros(2, np.int16)])   # 4 header words + an odd number of
+        if self.burst is None:                           # samples is not sent; one zero sample pads it
+            self.burst = self.dev.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, [0], {"bufferLength": str(CHUNK),
+                                                                                  "headers": "true"})
+            self.dev.activateStream(self.burst)           # packet headers carry the time (raw: none)
+            for ch in (0x418, 0x458):
+                self.dds.reg(ch, 2)
+            self.burst_q = queue.Queue()
+            self.burst_thread = threading.Thread(target=self.burst_sender, args=(self.burst, self.burst_q),
+                                                 daemon=True)
+            self.burst_thread.start()
+        self.burst_q.put((iq, t_ns))
+        return len(iq) // 2
+
+    def burst_sender(self, stream, q):
+        while True:
+            item = q.get()
+            if item is None:
+                return
+            iq, t_ns = item
+            n, p, flags = len(iq) // 2, 0, SOAPY_SDR_HAS_TIME
+            while p < n:
+                k = min(CHUNK, n - p)
+                r = self.dev.writeStream(stream, [iq[2 * p:]], k,
+                                         flags | (SOAPY_SDR_END_BURST if p + k == n else 0), t_ns, timeoutUs=500000)
+                if r.ret == SoapySDR.SOAPY_SDR_TIMEOUT:
+                    if q.queue and q.queue[-1] is None:  # closing: give up on this burst
+                        break
+                    continue                             # waiting for an earlier burst's buffer
+                if r.ret <= 0:
+                    print(f"burst: writeStream {r.ret}", flush=True)
+                    break
+                p += r.ret
+                flags = 0                                # the time applies to the first sample only
+
+    def close_burst(self):
+        if self.burst is not None:
+            with self.burst_q.mutex:
+                self.burst_q.queue.clear()               # cancel what has not been written
+            self.burst_q.put(None)
+            self.burst_thread.join(5)
+            self.dev.deactivateStream(self.burst)
+            self.dev.closeStream(self.burst)
+            self.burst = None
 
     def host1(self, data, n_out):
         args = {"port": "1", "headers": "false", "bufferLength": str(CHUNK)}
@@ -319,6 +355,7 @@ class Bridge:
         elif cmd == "tx_burst":
             t = int(r["time"]) if "time" in r else self.dev.getHardwareTime() + int(float(r.get("delay", 0.1)) * 1e9)
             reply({"ok": True, "samples": self.tx_burst(data, t), "time": t})
+            self.tx_owner = who
         elif cmd == "host1":
             reply({"ok": True}, self.host1(data, int(r["n_out"])))
         elif cmd == "route":
