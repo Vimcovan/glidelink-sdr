@@ -5,6 +5,13 @@
 // that I steps by exactly 1 (mod 4096) and Q only stays or steps by 1, so lost samples (I steps)
 // and stale buffers (Q jumps) on either side are counted.
 //
+// libiio queues 4 buffers per direction, and the TX thread must hand over the next buffer
+// before the 3 already queued have played out. Normal scheduling now and then keeps it away
+// for 3 to 7 ms, so the buffers default to 262144 samples (5.2 ms at 50 MSPS, 15 ms of
+// slack); with 65536 the slack is 3.9 ms and a long run occasionally underflows (TX_UNDERFLOW,
+// then broken data). More kernel buffers do not help: the AXI DMAC (scatter-gather mode) runs
+// at most about 4 queued transfers, and blocks beyond that are lost (docs/phase3_modules.md 5).
+//
 //   gcc -O2 -o ramp_loopback_iio ramp_loopback_iio.c -liio -lpthread
 //   ./ramp_loopback_iio [rate_sps] [seconds] [buffer_samples]
 
@@ -57,7 +64,7 @@ int main(int argc, char **argv)
 {
 	long long rate = argc > 1 ? atof(argv[1]) : 30.72e6;
 	double seconds = argc > 2 ? atof(argv[2]) : 10;
-	size_t len = argc > 3 ? atol(argv[3]) : 65536;
+	size_t len = argc > 3 ? atol(argv[3]) : 262144;
 
 	struct iio_context *ctx = iio_create_local_context();
 	struct iio_device *phy = iio_context_find_device(ctx, "ad9361-phy");
@@ -77,6 +84,8 @@ int main(int argc, char **argv)
 		iio_device_reg_write(shell, 0x054, cfg & ~0xcu);
 		iio_device_reg_write(shell, 0x05C, 3);
 	}
+	// shell 1.5 and later deliver RX as the 12-bit ADC value shifted left by 4
+	int rx_shift = version >= 0x00010500 ? 4 : 0;
 
 	iio_channel_attr_write_longlong(iio_device_find_channel(phy, "voltage0", false),
 					"sampling_frequency", rate);
@@ -90,6 +99,11 @@ int main(int argc, char **argv)
 		perror("create buffer");
 		return 1;
 	}
+
+	// TX underflows while running; stopping TX adds one more, so read before that
+	uint32_t ufl0 = 0, ufl1 = 0;
+	if (shell)
+		iio_device_reg_read(shell, 0x044, &ufl0);
 
 	pthread_t th;
 	pthread_create(&th, NULL, tx_loop, NULL);
@@ -107,7 +121,7 @@ int main(int argc, char **argv)
 			continue;	// RX starts before the first TX buffer reaches the DAC
 		const int16_t *p = iio_buffer_start(rxbuf), *end = iio_buffer_end(rxbuf);
 		for (; p < end; p += 2, samples++) {
-			int i = p[0], q = p[1];
+			int i = p[0] >> rx_shift, q = p[1] >> rx_shift;
 			if (have_prev) {
 				if (((i - prev_i) & 4095) != 1)
 					i_err++;
@@ -121,6 +135,8 @@ int main(int argc, char **argv)
 		}
 	}
 	double dt = now() - t0;
+	if (shell)
+		iio_device_reg_read(shell, 0x044, &ufl1);
 	stop = 1;
 	pthread_join(th, NULL);
 
@@ -128,8 +144,8 @@ int main(int argc, char **argv)
 	iio_buffer_destroy(txbuf);
 	iio_device_debug_attr_write(phy, "loopback", "0");
 	printf("%.2f MSPS set, RX %.2f MSPS over %.1f s (%lld buffers of %zu), %ld TX buffers: "
-	       "I steps != 1: %lld, Q jumps: %lld\n", rate / 1e6, samples / dt / 1e6, dt, refills,
-	       len, tx_buffers, i_err, q_err);
+	       "I steps != 1: %lld, Q jumps: %lld, TX underflows: %u\n", rate / 1e6, samples / dt / 1e6,
+	       dt, refills, len, tx_buffers, i_err, q_err, ufl1 - ufl0);
 	iio_context_destroy(ctx);
 	return 0;
 }
