@@ -29,7 +29,7 @@ def competition():
 def platform(path):
     rows = json.load(open(path))["results"]
     return [(-r["evm_db"], r["psnr"]["mean"], r["att"]) for r in rows
-            if r["evm_db"] is not None and r["psnr"]["mean"] is not None and r["rx_fps"] >= 25]
+            if r["evm_db"] is not None and r["evm_db"] < 0 and r["psnr"]["mean"] is not None and r["rx_fps"] >= 25]
 
 
 def main():

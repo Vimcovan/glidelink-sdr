@@ -16,8 +16,8 @@ sweep    image quality against TX attenuation, as the competition's run k0802_fi
            psnr          mean / 10th percentile / median PSNR of the decoded images against the
                          image the TX sends (centre crop + 256x256 Lanczos, as the TX application)
            evm_db        final constellation EVM, decision directed on the 64-QAM levels without
-                         scaling (the competition's formula), over 4 frames of the receiver's soft
-                         symbols (jscc_rx_app "symbols")
+                         scaling (the competition's formula), per frame of the receiver's soft
+                         symbols (jscc_rx_app "symbols"), median of 4 frames
            snr_da_db     data-aided SNR of the same symbols against the encoder output for the
                          image (hw/modules/jscc_enc/model.py), complex gain fitted
            rx_gain_db    AD9361 RX gain chosen by the AGC, and its RSSI
@@ -164,10 +164,13 @@ def symbols(rxc, n=4):
     return i + 1j * q
 
 
-def evm_db(z):
-    z = z.reshape(-1)
-    ref = QAM_LV[np.argmin(abs(z.real[:, None] - QAM_LV), 1)] + 1j * QAM_LV[np.argmin(abs(z.imag[:, None] - QAM_LV), 1)]
-    return float(10 * np.log10(np.mean(abs(z - ref) ** 2) / np.mean(abs(ref) ** 2)))
+def evm_db(frames):
+    """median over the frames of the per-frame EVM (one bad frame in a capture must not move the point)"""
+    out = []
+    for z in frames:
+        ref = QAM_LV[np.argmin(abs(z.real[:, None] - QAM_LV), 1)] + 1j * QAM_LV[np.argmin(abs(z.imag[:, None] - QAM_LV), 1)]
+        out.append(10 * np.log10(np.mean(abs(z - ref) ** 2) / np.mean(abs(ref) ** 2)))
+    return float(np.median(out))
 
 
 def snr_da_db(z, e):
@@ -243,7 +246,9 @@ def main():
         print(txc.cmd(f"att {a.att0 + a.top}"))
         time.sleep(a.top_settle)
         rows = []
-        for extra in [float(x) for x in a.att.split(",")]:
+        result["results"] = rows
+
+        def point(extra):
             txc.cmd(f"att {a.att0 + extra}")
             time.sleep(a.settle)
             rx.take()
@@ -255,17 +260,32 @@ def main():
             span = time.time() - t0
             p = [psnr(img, ref) for _, _, img in got]
             z = symbols(rxc, 4)
-            row = {"att": extra, "rx_fps": round(len(got) / span, 2), "frames": len(got),
-                   "rx_gain_db": float(rf[1]), "rssi_db": float(rf[2]),
-                   "psnr": stats(p), "evm_db": round(evm_db(z), 2) if len(z) else None,
-                   "snr_da_db": round(snr_da_db(z, e), 2) if len(z) else None, "sym_frames": len(z)}
+            return {"att": extra, "rx_fps": round(len(got) / span, 2), "frames": len(got),
+                    "rx_gain_db": float(rf[1]), "rssi_db": float(rf[2]),
+                    "psnr": stats(p), "evm_db": round(evm_db(z), 2) if len(z) else None,
+                    "snr_da_db": round(snr_da_db(z, e), 2) if len(z) else None, "sym_frames": len(z)}
+
+        for extra in [float(x) for x in a.att.split(",")]:
+            for attempt in range(3):
+                try:
+                    row = point(extra)
+                    break
+                except OSError as err:                  # the USB network link to a board reset: reconnect
+                    print(f"att {extra:5.1f}: {err}, reconnecting", flush=True)
+                    time.sleep(5)
+                    txc, rxc = Line(a.tx, 7020), Line(a.rx, 7022)
+                    rx = RxImages(a.rx)
+                    rx.start()
+                    time.sleep(a.settle)
+            else:
+                raise RuntimeError(f"att {extra}: no measurement after 3 attempts")
             rows.append(row)
             print(f"att {extra:5.1f}: {row['rx_fps']:5.2f} fps, PSNR {row['psnr']['mean']}, "
                   f"EVM {row['evm_db']} dB, SNR(DA) {row['snr_da_db']} dB, RX gain {row['rx_gain_db']} dB",
                   flush=True)
+            json.dump(result, open(os.path.join(a.out, "sweep.json"), "w"), indent=1)
         result["environment_after"] = environment(txc, rxc)
         txc.cmd(f"att {a.att0}")
-        result["results"] = rows
         with open(os.path.join(a.out, "sweep.csv"), "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["att", "rx_fps", "frames", "psnr_mean", "psnr_p10", "psnr_median", "evm_db", "snr_da_db",

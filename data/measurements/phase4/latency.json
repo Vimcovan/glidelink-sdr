@@ -1,0 +1,48 @@
+{
+ "args": {
+  "mode": "latency",
+  "tx": "192.168.4.1",
+  "rx": "192.168.3.1",
+  "att0": 4.0,
+  "att": "54,52,51,50,49,48,47,46,45,44,43,42,41,40,39,38,37,36,35,34,33.5,33,32.5,32,31.5,31,30.5,30,29.5,29,28.5,28,27,26,24,22,20,16,12,8,4,0",
+  "top": 56.0,
+  "top_settle": 5.0,
+  "settle": 3.0,
+  "dwell": 60.0,
+  "presets": "C:/Users/PC/AppData/Local/Temp/claude/D--ClaudePrj-DeepJSCC-Q/9a8b0793-c517-4c5b-aceb-f63d64526a64/scratchpad/presets",
+  "image": "div2k_0802.png",
+  "board_presets": "/home/xilinx/claude/tx/media/presets",
+  "out": "D:\\ClaudePrj\\glidelink-sdr\\sw\\offline\\..\\..\\data\\measurements\\phase4"
+ },
+ "started": 1793358779.115268,
+ "images": [
+  "div2k_0801.png",
+  "div2k_0802.png",
+  "div2k_0803.png",
+  "div2k_0830.png",
+  "div2k_0843.png"
+ ],
+ "clock": {
+  "tx_offset": -49.15478754043579,
+  "tx_rtt_ms": 0.16379356384277344,
+  "rx_offset": 0.2356717586517334,
+  "rx_rtt_ms": 0.19979476928710938
+ },
+ "latency_ms": {
+  "mean": 82.26,
+  "p10": 79.92,
+  "median": 84.1,
+  "p90": 84.32,
+  "n": 1796
+ },
+ "ambiguous": 4,
+ "rx_fps": 30.0,
+ "tx_fps": 30.0,
+ "psnr": {
+  "mean": 32.83,
+  "p10": 30.64,
+  "median": 31.86,
+  "p90": 38.66,
+  "n": 1800
+ }
+}

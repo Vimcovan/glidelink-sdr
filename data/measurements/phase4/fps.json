@@ -1,0 +1,27 @@
+{
+ "args": {
+  "mode": "fps",
+  "tx": "192.168.4.1",
+  "rx": "192.168.3.1",
+  "att0": 4.0,
+  "att": "54,52,51,50,49,48,47,46,45,44,43,42,41,40,39,38,37,36,35,34,33.5,33,32.5,32,31.5,31,30.5,30,29.5,29,28.5,28,27,26,24,22,20,16,12,8,4,0",
+  "top": 56.0,
+  "top_settle": 5.0,
+  "settle": 3.0,
+  "dwell": 600.0,
+  "presets": null,
+  "image": "div2k_0802.png",
+  "board_presets": "/home/xilinx/claude/tx/media/presets",
+  "out": "D:\\ClaudePrj\\glidelink-sdr\\sw\\offline\\..\\..\\data\\measurements\\phase4"
+ },
+ "started": 1793358850.0266733,
+ "frames": 17997,
+ "rx_fps": 29.97,
+ "per_second": {
+  "mean": 29.97,
+  "p10": 29.97,
+  "median": 29.98,
+  "p90": 29.99,
+  "n": 600
+ }
+}
