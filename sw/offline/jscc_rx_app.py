@@ -18,6 +18,7 @@ Control (TCP --ctrl, one line per command):
                          receiver's output instead of the decoder's, then the routes are restored
                          and the decoder flushed (it counts its own frames; a partial frame would
                          shift every later image)
+    rf                -> "rf <RX gain dB> <RSSI dB> <ofdm_rx FRAMES_IN>"
 Statistics go to /run/glidelink/rx_app.json every second.
 """
 import argparse
@@ -43,7 +44,7 @@ MAGIC = b"JRX1"
 class App:
     def __init__(self, a):
         self.a, self.clients, self.lock = a, [], threading.Lock()
-        self.shell = IioDev("glidelink-shell")
+        self.shell, self.phy = IioDev("glidelink-shell"), IioDev("ad9361-phy")
         self.dev = SoapySDR.Device(a.args)
         self.rx = self.dev.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [0],
                                        {"port": "1", "headers": "true", "bufferLength": "16384"})
@@ -87,6 +88,10 @@ class App:
                 ok = req[1].wait(10.0)
                 data = b"".join(req[2]) if ok else b""
                 f.write(f"symbols {len(req[2]) if ok else 0} {len(data)}\n".encode() + data)
+            elif cmd == "rf":
+                g = self.phy.attr("in_voltage0_hardwaregain").split()[0]
+                r = self.phy.attr("in_voltage0_rssi").split()[0]
+                f.write(f"rf {g} {r} {self.shell.reg(0x2000 + 0x1000 * self.a.phy_slot + 0x010)}\n".encode())
             else:
                 f.write(b"error unknown command\n")
 

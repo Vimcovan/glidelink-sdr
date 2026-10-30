@@ -20,6 +20,9 @@ sweep    image quality against TX attenuation, as the competition's run k0802_fi
                          symbols (jscc_rx_app "symbols")
            snr_da_db     data-aided SNR of the same symbols against the encoder output for the
                          image (hw/modules/jscc_enc/model.py), complex gain fitted
+           rx_gain_db    AD9361 RX gain chosen by the AGC, and its RSSI
+         Before and after the sweep the TX is turned off for a few seconds and the RX gain / RSSI
+         recorded: in-band interference moves the synchronisation edge.
 --att    extra attenuation over --att0 (the TX configuration's 4 dB; the competition's att0 was 0
          over its own 4 dB), so the points are comparable one to one.
 latency  end-to-end latency, TX application takes a frame (before the image is written to host port
@@ -183,6 +186,21 @@ def encoder_symbols(img):
     return s[:, 0] + 1j * s[:, 1]
 
 
+def environment(txc, rxc, seconds=6.0):
+    """the RX side with the TX off (attenuation 89.75 dB): AGC gain and RSSI. In-band interference
+    (915 MHz is next to the GSM 900 uplink) pulls the fast-attack AGC down and moves the
+    synchronisation edge, so every sweep records it before and after"""
+    txc.cmd("att 89.75")
+    time.sleep(seconds / 2)
+    rf = []
+    for _ in range(3):
+        rf.append([float(x) for x in rxc.cmd("rf").split()[1:3]])
+        time.sleep(seconds / 6)
+    g, r = np.mean(rf, 0)
+    print(f"TX off: RX gain {g:.1f} dB, RSSI {r:.1f} dB", flush=True)
+    return {"rx_gain_db": round(float(g), 1), "rssi_db": round(float(r), 1)}
+
+
 def stats(v):
     v = np.asarray(v, float)
     if len(v) == 0:
@@ -221,6 +239,7 @@ def main():
         print(txc.cmd(f"src {a.board_presets}/{a.image}"))
         rx = RxImages(a.rx)
         rx.start()
+        result["environment_before"] = environment(txc, rxc)
         print(txc.cmd(f"att {a.att0 + a.top}"))
         time.sleep(a.top_settle)
         rows = []
@@ -229,25 +248,31 @@ def main():
             time.sleep(a.settle)
             rx.take()
             t0 = time.time()
-            time.sleep(a.dwell)
+            time.sleep(a.dwell / 2)
+            rf = rxc.cmd("rf").split()
+            time.sleep(a.dwell / 2)
             got = rx.take()
             span = time.time() - t0
             p = [psnr(img, ref) for _, _, img in got]
             z = symbols(rxc, 4)
             row = {"att": extra, "rx_fps": round(len(got) / span, 2), "frames": len(got),
+                   "rx_gain_db": float(rf[1]), "rssi_db": float(rf[2]),
                    "psnr": stats(p), "evm_db": round(evm_db(z), 2) if len(z) else None,
                    "snr_da_db": round(snr_da_db(z, e), 2) if len(z) else None, "sym_frames": len(z)}
             rows.append(row)
             print(f"att {extra:5.1f}: {row['rx_fps']:5.2f} fps, PSNR {row['psnr']['mean']}, "
-                  f"EVM {row['evm_db']} dB, SNR(DA) {row['snr_da_db']} dB", flush=True)
+                  f"EVM {row['evm_db']} dB, SNR(DA) {row['snr_da_db']} dB, RX gain {row['rx_gain_db']} dB",
+                  flush=True)
+        result["environment_after"] = environment(txc, rxc)
         txc.cmd(f"att {a.att0}")
         result["results"] = rows
         with open(os.path.join(a.out, "sweep.csv"), "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["att", "rx_fps", "frames", "psnr_mean", "psnr_p10", "psnr_median", "evm_db", "snr_da_db"])
+            w.writerow(["att", "rx_fps", "frames", "psnr_mean", "psnr_p10", "psnr_median", "evm_db", "snr_da_db",
+                        "rx_gain_db", "rssi_db"])
             for r in rows:
                 w.writerow([r["att"], r["rx_fps"], r["frames"], r["psnr"]["mean"], r["psnr"]["p10"],
-                            r["psnr"]["median"], r["evm_db"], r["snr_da_db"]])
+                            r["psnr"]["median"], r["evm_db"], r["snr_da_db"], r["rx_gain_db"], r["rssi_db"]])
 
     elif a.mode == "latency":
         files = sorted(f for f in os.listdir(a.presets) if f.lower().endswith((".png", ".jpg", ".jpeg", ".npy")))
