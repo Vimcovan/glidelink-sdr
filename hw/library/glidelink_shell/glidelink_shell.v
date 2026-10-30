@@ -14,6 +14,11 @@
 // TX adapter, the switch's packet state for it and the RF TX streamer, and drops
 // whatever the RF TX sink was connected to; slot 0 resets the slot and its
 // switch connections (a slot left holding half a packet).
+// Switch packets carry tuser = {flags[7:0], timestamp[63:0]} on the first
+// beat, one set of flags for every port (host port headers carry them as
+// they are): bit 0 = packets were dropped before this one, bit 1 = end of
+// burst, bit 2 = timed (the RF TX streamer sends it at the timestamp); host
+// port RX headers add bit 7 = part of a longer packet.
 // The DMA side pins are deliberately not named *_tdata/_tvalid so that they
 // can be wired pin by pin to axi_dmac in the block design.
 // ***************************************************************************

@@ -1,0 +1,61 @@
+id: glidelink_control
+label: GlideLink Control
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: args
+    label: Device arguments
+    dtype: string
+    default: 'driver=glidelink'
+-   id: routes
+    label: Routes
+    dtype: raw
+    default: '{}'
+-   id: settings
+    label: Settings
+    dtype: raw
+    default: '{}'
+-   id: registers
+    label: Registers
+    dtype: raw
+    default: '{}'
+-   id: readback
+    label: Read back
+    dtype: raw
+    default: '[]'
+-   id: interval
+    label: Read-back interval (s)
+    dtype: real
+    default: '1.0'
+
+inputs:
+-   domain: message
+    id: cmd
+    optional: true
+
+outputs:
+-   domain: message
+    id: status
+    optional: true
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.control(${args}, ${routes}, ${settings}, ${registers}, ${readback}, ${interval})
+    callbacks:
+    - set_settings(${settings})
+
+documentation: |-
+    Connections inside the GlideLink PL shell, AD9361 driver parameters and registers. No streams: the RF streams stay with the Soapy source / sink (driver=glidelink).
+
+    Routes: {sink: source}. Sinks rf_tx, host0_rx, slot0_in, host1_rx; sources rf_rx, host0_tx, slot0_out, host1_tx, none. Example: {'slot0_in': 'rf_rx', 'host0_rx': 'slot0_out'} puts slot 0 between the RF receiver and the Soapy source.
+
+    Settings: {key: value}, written in order. Keys are the AD9361 driver parameters by device-tree name (e.g. 'adi,agc-inner-thresh-high', the fast-AGC lock level; list them with SoapySDRUtil --probe), 'gain_control_mode' (manual, fast_attack, slow_attack, hybrid) and 'initialize': True, which re-initialises the AD9361 with the parameters as now set (about 1 s; frequency, sample rate, bandwidth, gains are kept). When a variable used here changes at run time, the entries that changed are written and, with 'initialize': True, the chip is re-initialised.
+
+    Registers: {'AD9361:0x101': value, 'FPGA:0x2010': value}, written at start.
+
+    Read back: items sent as a dictionary on the status port every interval: register names ('AD9361:0x101'), setting keys, 'route:<sink>'. read(item) returns one, for a Function Probe.
+
+    The cmd port takes a dictionary of the same keys (settings, register names, 'route:<sink>').
+
+file_format: 1

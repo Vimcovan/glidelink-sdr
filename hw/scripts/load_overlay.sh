@@ -34,3 +34,17 @@ cat "$DTBO" > "$OVL/$NAME/dtbo"
 STATUS=$(cat "$OVL/$NAME/status")
 echo "$NAME: $STATUS"
 [ "$STATUS" = applied ]
+
+# iiod builds its device list when it starts (at boot, before the overlay):
+# restart it so that network clients see the new devices, once the AD9361
+# drivers have probed (a few seconds after the overlay is applied)
+if systemctl is-active -q iiod; then
+	for i in $(seq 1 30); do
+		names=$(cat /sys/bus/iio/devices/iio:device*/name 2>/dev/null)
+		echo "$names" | grep -qx ad9361-phy && echo "$names" | grep -qx cf-ad9361-lpc &&
+			echo "$names" | grep -qx cf-ad9361-dds-core-lpc && break
+		sleep 1
+	done
+	systemctl restart iiod
+	echo "iiod restarted"
+fi

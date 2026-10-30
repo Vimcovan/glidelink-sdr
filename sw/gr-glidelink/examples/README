@@ -1,0 +1,3 @@
+agc_fast_attack.grc  fast AGC: a slider changes the lock level (adi,agc-inner-thresh-high); each change
+                     writes it and re-initialises the AD9361; register 0x101, spectrum and |x| shown.
+                     Parameter uri selects the board (default ip:192.168.3.1).

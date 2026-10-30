@@ -5,8 +5,9 @@
 // channel 0 DAC, one sample per dac_valid (l_clk):
 //   tdata = {Q, I}, tlast on the last sample,
 //   tuser = {flags[7:0], time[63:0]} on the first beat,
-//   flags bit 0 = timed: start the packet when the sample counter reaches time,
-//   flags bit 1 = end of burst: idle (zeros) after this packet is not an underflow.
+//   flags bit 1 = end of burst: idle (zeros) after this packet is not an underflow,
+//   flags bit 2 = timed: start the packet when the sample counter reaches time
+//   (bit 0, drops before this packet, is ignored).
 // A timed packet found already late is dropped (late_drop = 1) or sent at
 // once; either way it is counted in late. Running out of data inside a burst
 // sends zeros and counts one underflow per dry spell. Counters are Gray-coded
@@ -41,7 +42,7 @@ module glidelink_tx_stream #(
   output            dac_dunf              // to axi_ad9361: underflow
 );
 
-  localparam FLAG_TIMED = 0, FLAG_EOB = 1;
+  localparam FLAG_EOB = 1, FLAG_TIMED = 2;
 
   wire        data_full, hdr_full;
   wire [32:0] data_out;

@@ -176,7 +176,7 @@ module tb_shell2;
   task make_burst(input integer b, input [63:0] t);
     integer k;
     begin
-      frame[0] = {8'hA5, 8'h03, 16'd100};          // timed, end of burst, 100 samples
+      frame[0] = {8'hA5, 8'h06, 16'd100};          // timed, end of burst, 100 samples
       frame[1] = b;
       frame[2] = t[31:0];
       frame[3] = t[63:32];

@@ -4,9 +4,13 @@
 // either on the board (uri=local:, the default) or from a PC through the
 // board's iiod (uri=ip:<board>).
 //
-// Phase 0 scope: standard parameters (frequency, sample rate, bandwidth, gain,
-// antenna), RX / TX streams in CS16 and CF32, and raw AD9361 register access.
-// CS16 is the AD9361's 12-bit sample with full scale 2048 in both directions.
+// Three layers of control (docs/design.md 7.2): standard parameters (frequency,
+// sample rate, bandwidth, gain, antenna); the driver's device-tree parameters as
+// settings (debugfs, applied by the "initialize" setting); raw AD9361 and PL
+// shell registers. Streams: RF RX / TX through host port 0, in CS16 and CF32,
+// where CS16 is the AD9361's 12-bit sample with full scale 2048 in both
+// directions; and host port 1 (stream argument port=1), whose 32-bit words pass
+// unchanged as CS16 (full scale 32768 for CF32).
 
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Formats.hpp>
@@ -20,6 +24,7 @@
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -36,6 +41,10 @@ const size_t DEFAULT_BUFFER_LENGTH = 65536;    // samples per IIO buffer; 4 queu
 // only bit-exact up to 50 MSPS (pairs D4/D5, hw/dts/fmcomms2_pynqzu.dtso)
 const double MAX_SAMPLE_RATE = 50e6;
 const unsigned DEFAULT_TIMEOUT_MS = 1000;
+// for driver operations that can take over a second (re-initialisation about
+// 1 s, a sample rate change up to 1.4 s with the FIR reloaded): over the
+// network, an expired timeout drops the connection to iiod
+const unsigned SLOW_TIMEOUT_MS = 10000;
 const double TX_ATTEN_MAX = 89.75;             // dB, TX gain = 89.75 + hardwaregain
 
 std::string chanName(size_t i) { return "voltage" + std::to_string(i); }
@@ -43,6 +52,7 @@ std::string chanName(size_t i) { return "voltage" + std::to_string(i); }
 struct Stream {
 	int direction;
 	bool cf32;
+	unsigned port = 0;              // host port: 0 = RF channels, 1 = module data
 	std::vector<size_t> channels;   // user order
 	std::vector<size_t> slot;       // position of channels[i] in the buffer's sample
 	size_t numSlots = 0;
@@ -62,16 +72,43 @@ struct Stream {
 	bool overflow = false;          // RX: report an overflow before the next samples
 	bool firstPacket = true;        // RX: drops before the stream started are not its overflow
 	uint32_t seq = 0;               // TX: packet sequence number
+	uint32_t timedFlag = 0;         // TX: header flag of a timed packet (by shell version)
+	bool flagsShared = false;       // shell >= 1.3: one set of flags in both directions
+	bool pktEob = false;            // RX: the current packet ends a burst
 };
 
 const uint32_t HDR_MAGIC = 0xA5;
-const uint32_t FLAG_RX_DROPPED = 1u << 0, FLAG_TX_TIMED = 1u << 0, FLAG_TX_EOB = 1u << 1;
-const unsigned SHELL_VERSION_HEADERS = 0x00010100;
+// header flags = tuser flags (hw/library/glidelink_shell/glidelink_shell.v); before
+// shell 1.3 the TX side had its own bit 0 = timed
+const uint32_t FLAG_DROPPED = 1u << 0, FLAG_EOB = 1u << 1, FLAG_TIMED = 1u << 2, FLAG_TIMED_OLD = 1u << 0;
+const unsigned SHELL_VERSION_HEADERS = 0x00010100, SHELL_VERSION_FLAGS = 0x00010300;
 // shell registers (hw/library/glidelink_shell/glidelink_shell_regs.v)
 const unsigned REG_VERSION = 0x004, REG_CONFIG = 0x054, REG_PORT_RESET = 0x05C, REG_ROUTE = 0x1000;
-const unsigned PORT_RESET_HOST0_RX = 1u << 0, PORT_RESET_HOST0_TX = 1u << 1;
-const unsigned CFG_RX_ENABLE = 1u << 0, CFG_HOST0_RX_HDR = 1u << 2, CFG_HOST0_TX_HDR = 1u << 3;
-const unsigned SINK_RF_TX = 0, SINK_HOST0_RX = 1, SRC_RF_RX = 0, SRC_HOST0_TX = 1, ROUTE_NONE = 0xF;
+const unsigned CFG_RX_ENABLE = 1u << 0, ROUTE_NONE = 0xF;
+const unsigned SINK_RF_TX = 0, SRC_RF_RX = 0;
+
+// per host port: its DMAs' IIO devices (port 0: the AD9361 cores), PORT_RESET
+// bits, CONFIG header bits, its switch sink (RX side) and source (TX side)
+struct HostPort {
+	const char *rxName, *txName;
+	unsigned rxReset, txReset, rxHdr, txHdr, rxSink, txSource;
+};
+const HostPort HOST_PORTS[2] = {
+	{RX_NAME, TX_NAME, 1u << 0, 1u << 1, 1u << 2, 1u << 3, 1, 1},
+	{"glidelink-host1-rx", "glidelink-host1-tx", 1u << 3, 1u << 4, 1u << 4, 1u << 5, 3, 3},
+};
+const unsigned SHELL_VERSION_HOST1 = 0x00010200;
+// slot 0: its input is switch sink 2, its output switch source 2
+const unsigned SLOT0_SINK = 2, SLOT0_SOURCE = 2, PORT_RESET_SLOT0 = 1u << 2;
+
+// A re-initialisation brings back the device tree's values; the standard
+// parameters are restored afterwards unless their device-tree parameter was
+// written since the last initialisation.
+const char *DT_RX_BW = "adi,rf-rx-bandwidth-hz", *DT_TX_BW = "adi,rf-tx-bandwidth-hz";
+const char *DT_RX_PORT = "adi,rx-rf-port-input-select", *DT_TX_PORT = "adi,tx-rf-port-input-select";
+const char *DT_TX_ATTEN = "adi,tx-attenuation-mdB";
+const char *DT_GC_MODE[2] = {"adi,gc-rx1-mode", "adi,gc-rx2-mode"};
+const char *SETTING_INIT = "initialize", *SETTING_GAIN_MODE = "gain_control_mode";
 
 class GlideLink : public SoapySDR::Device {
 public:
@@ -90,6 +127,8 @@ public:
 			throw std::runtime_error("GlideLink: AD9361 IIO devices not found at " + uri);
 		}
 		shell = iio_context_find_device(ctx, SHELL_NAME);
+		host1Rx = iio_context_find_device(ctx, HOST_PORTS[1].rxName);
+		host1Tx = iio_context_find_device(ctx, HOST_PORTS[1].txName);
 		iio_context_set_timeout(ctx, DEFAULT_TIMEOUT_MS);
 	}
 
@@ -136,18 +175,7 @@ public:
 
 	std::vector<std::string> listAntennas(const int dir, const size_t ch) const override
 	{
-		std::string s = readAttr(phyChan(dir, ch), "rf_port_select_available");
-		std::vector<std::string> names;
-		size_t p = 0;
-		while (p < s.size()) {
-			size_t q = s.find(' ', p);
-			if (q == std::string::npos)
-				q = s.size();
-			if (q > p)
-				names.push_back(s.substr(p, q - p));
-			p = q + 1;
-		}
-		return names;
+		return splitWords(readAttr(phyChan(dir, ch), "rf_port_select_available"));
 	}
 
 	void setAntenna(const int dir, const size_t ch, const std::string &name) override
@@ -166,8 +194,11 @@ public:
 
 	void setGainMode(const int dir, const size_t ch, const bool automatic) override
 	{
-		if (dir == SOAPY_SDR_RX)
-			writeAttr(phyChan(dir, ch), "gain_control_mode", automatic ? "slow_attack" : "manual");
+		// automatic keeps an AGC mode already chosen (fast_attack, hybrid through
+		// the gain_control_mode setting) and takes slow_attack from manual
+		if (dir != SOAPY_SDR_RX || automatic == getGainMode(dir, ch))
+			return;
+		writeAttr(phyChan(dir, ch), "gain_control_mode", automatic ? "slow_attack" : "manual");
 	}
 
 	bool getGainMode(const int dir, const size_t ch) const override
@@ -184,6 +215,10 @@ public:
 
 	void setGain(const int dir, const size_t ch, const std::string &, const double value) override
 	{
+		// under AGC the chip sets the RX gain (and refuses writes): tools that
+		// always set a gain (gr-soapy) are not an error
+		if (dir == SOAPY_SDR_RX && getGainMode(dir, ch))
+			return;
 		double hw = dir == SOAPY_SDR_RX ? value : value - TX_ATTEN_MAX;
 		writeDouble(phyChan(dir, ch), "hardwaregain", hw);
 	}
@@ -236,7 +271,7 @@ public:
 		if (rate > MAX_SAMPLE_RATE)
 			throw std::runtime_error("GlideLink: sample rate above " +
 						 std::to_string(llround(MAX_SAMPLE_RATE)) + " S/s");
-		writeLongLong(phyChan(dir, ch), "sampling_frequency", llround(rate));
+		slow([&] { writeLongLong(phyChan(dir, ch), "sampling_frequency", llround(rate)); });
 	}
 
 	double getSampleRate(const int dir, const size_t ch) const override
@@ -275,6 +310,87 @@ public:
 	SoapySDR::RangeList getBandwidthRange(const int dir, const size_t ch) const override
 	{
 		return {readRange(phyChan(dir, ch), "rf_bandwidth_available")};
+	}
+
+	// settings: the driver's debugfs parameters by their device-tree names
+	// ("adi,...", plus "loopback" and the other debug attributes), applied to
+	// the chip by "initialize"; and the RX gain control mode by name
+
+	SoapySDR::ArgInfoList getSettingInfo() const override
+	{
+		SoapySDR::ArgInfoList list;
+		SoapySDR::ArgInfo init;
+		init.key = SETTING_INIT;
+		init.value = "false";
+		init.name = "Re-initialise";
+		init.description = "Writing true re-initialises the AD9361 with the device-tree parameters as now "
+				   "set (about 1 s); frequency, sample rate, bandwidth, ports, gain mode and gains "
+				   "are restored unless their own parameter was written.";
+		init.type = SoapySDR::ArgInfo::BOOL;
+		list.push_back(init);
+		SoapySDR::ArgInfo mode;
+		mode.key = SETTING_GAIN_MODE;
+		mode.value = readAttr(phyChan(SOAPY_SDR_RX, 0), "gain_control_mode");
+		mode.name = "RX gain control mode";
+		mode.description = "AD9361 gain control of all RX channels.";
+		mode.type = SoapySDR::ArgInfo::STRING;
+		mode.options = splitWords(readAttr(phyChan(SOAPY_SDR_RX, 0), "gain_control_mode_available"));
+		list.push_back(mode);
+		for (const std::string &key : debugAttrs()) {
+			SoapySDR::ArgInfo a;
+			a.key = key;
+			a.value = readDebug(key);
+			a.name = key;
+			a.description = "AD9361 driver parameter (debugfs); a device-tree parameter takes effect "
+					"on initialize.";
+			a.type = SoapySDR::ArgInfo::STRING;
+			list.push_back(a);
+		}
+		return list;
+	}
+
+	void writeSetting(const std::string &key, const std::string &value) override
+	{
+		if (key == SETTING_INIT) {
+			if (value == "true" || value == "1")
+				initialize();
+			return;
+		}
+		if (key == SETTING_GAIN_MODE) {
+			for (size_t ch = 0; ch < getNumChannels(SOAPY_SDR_RX); ch++)
+				writeAttr(phyChan(SOAPY_SDR_RX, ch), "gain_control_mode", value);
+			return;
+		}
+		checkDebugAttr(key);
+		slow([&] {                       // some (bist_*, digital_tune) act at once
+			std::lock_guard<std::mutex> lock(mutex);
+			if (iio_device_debug_attr_write(phy, key.c_str(), value.c_str()) < 0)
+				throw std::runtime_error("GlideLink: cannot write setting " + key + " = " + value);
+		});
+		written.insert(key);
+	}
+
+	std::string readSetting(const std::string &key) const override
+	{
+		if (key == SETTING_INIT)
+			return "false";
+		if (key == SETTING_GAIN_MODE)
+			return readAttr(phyChan(SOAPY_SDR_RX, 0), "gain_control_mode");
+		checkDebugAttr(key);
+		return readDebug(key);
+	}
+
+	// the settings belong to the device; per-channel calls (e.g. gr-soapy's
+	// "Other settings") reach the same ones, listed once at device level
+
+	void writeSetting(const int, const size_t, const std::string &key, const std::string &value) override
+	{
+		writeSetting(key, value);
+	}
+
+	std::string readSetting(const int, const size_t, const std::string &key) const override
+	{
+		return readSetting(key);
 	}
 
 	// registers: "AD9361" (SPI registers), "FPGA" (PL shell window, byte offsets)
@@ -357,7 +473,15 @@ public:
 		hdr.description = "Timestamps and burst flags through the shell's packet headers "
 				  "(shell 1.1 and later); off gives raw samples.";
 		hdr.type = SoapySDR::ArgInfo::BOOL;
-		return {len, hdr};
+		SoapySDR::ArgInfo port;
+		port.key = "port";
+		port.value = "0";
+		port.name = "Host port";
+		port.description = "0: the RF channels; 1: host port 1 of the PL shell (module data, 32-bit words "
+				   "unchanged, routed by the FPGA ROUTE registers).";
+		port.type = SoapySDR::ArgInfo::INT;
+		port.options = {"0", "1"};
+		return {len, hdr, port};
 	}
 
 	SoapySDR::Stream *setupStream(const int dir, const std::string &format,
@@ -374,10 +498,35 @@ public:
 		auto it = args.find("bufferLength");
 		if (it != args.end())
 			s->bufferLength = std::stoul(it->second);
+		it = args.find("port");
+		if (it != args.end())
+			s->port = std::stoul(it->second);
 		it = args.find("headers");
-		s->headers = shell && readRegister("FPGA", REG_VERSION) >= SHELL_VERSION_HEADERS &&
-			     (it == args.end() || it->second != "false") && s->channels.size() == 1 &&
-			     s->channels[0] == 0;
+		bool wantHeaders = it == args.end() || it->second != "false";
+		if (s->port == 1) {
+			s->dev = dir == SOAPY_SDR_RX ? host1Rx : host1Tx;
+			if (!s->dev || readRegister("FPGA", REG_VERSION) < SHELL_VERSION_HOST1 ||
+			    s->channels != std::vector<size_t>{0}) {
+				delete s;
+				throw std::runtime_error("GlideLink: host port 1 needs shell 1.2 with its DMA devices, "
+							 "and one channel (0)");
+			}
+			s->headers = wantHeaders;
+			setFlagBits(s);
+			s->slot = {0};
+			s->numSlots = 1;
+			iio_channel_enable(iio_device_find_channel(s->dev, "voltage0", dir == SOAPY_SDR_TX));
+			return reinterpret_cast<SoapySDR::Stream *>(s);
+		}
+		if (s->port != 0) {
+			unsigned port = s->port;
+			delete s;
+			throw std::runtime_error("GlideLink: no host port " + std::to_string(port));
+		}
+		s->headers = shell && readRegister("FPGA", REG_VERSION) >= SHELL_VERSION_HEADERS && wantHeaders &&
+			     s->channels.size() == 1 && s->channels[0] == 0;
+		if (s->headers)
+			setFlagBits(s);
 
 		size_t n = getNumChannels(dir);
 		std::vector<size_t> sorted = s->channels;
@@ -431,7 +580,7 @@ public:
 		s->firstPacket = true;
 		// RX: hold the RX streamer off until the DMA has its buffers queued, so
 		// the stream neither starts with a drop nor with samples from before it
-		bool gateRx = s->headers && s->direction == SOAPY_SDR_RX;
+		bool gateRx = s->headers && s->direction == SOAPY_SDR_RX && s->port == 0;
 		if (gateRx)
 			setRxEnable(false);
 		setPortHeaders(s, s->headers);
@@ -479,8 +628,8 @@ public:
 			if (s->cf32) {
 				float *dst = static_cast<float *>(buffs[i]);
 				for (size_t j = 0; j < n; j++, p += 2 * s->numSlots) {
-					dst[2 * j] = p[0] / 2048.0f;
-					dst[2 * j + 1] = p[1] / 2048.0f;
+					dst[2 * j] = p[0] / fullScale(s);
+					dst[2 * j + 1] = p[1] / fullScale(s);
 				}
 			} else {
 				int16_t *dst = static_cast<int16_t *>(buffs[i]);
@@ -511,14 +660,14 @@ public:
 			if (s->cf32) {
 				const float *src = static_cast<const float *>(buffs[i]);
 				for (size_t j = 0; j < n; j++, p += 2 * s->numSlots) {
-					p[0] = toDac(std::lround(src[2 * j] * 2048.0f));
-					p[1] = toDac(std::lround(src[2 * j + 1] * 2048.0f));
+					p[0] = toWord(s, std::lround(src[2 * j] * fullScale(s)));
+					p[1] = toWord(s, std::lround(src[2 * j + 1] * fullScale(s)));
 				}
 			} else {
 				const int16_t *src = static_cast<const int16_t *>(buffs[i]);
 				for (size_t j = 0; j < n; j++, p += 2 * s->numSlots) {
-					p[0] = toDac(src[2 * j]);
-					p[1] = toDac(src[2 * j + 1]);
+					p[0] = toWord(s, src[2 * j]);
+					p[1] = toWord(s, src[2 * j + 1]);
 				}
 			}
 		}
@@ -539,6 +688,14 @@ private:
 	static int16_t toDac(long v)
 	{
 		return static_cast<int16_t>(std::max(-2048L, std::min(2047L, v)) * 16);
+	}
+
+	// host port 0 carries AD9361 samples, host port 1 the module's words as they are
+	static float fullScale(const Stream *s) { return s->port == 0 ? 2048.0f : 32768.0f; }
+
+	static int16_t toWord(const Stream *s, long v)
+	{
+		return s->port == 0 ? toDac(v) : static_cast<int16_t>(std::max(-32768L, std::min(32767L, v)));
 	}
 
 	int refill(Stream *s)
@@ -577,7 +734,11 @@ private:
 				if (s->hdrPos == 4) {
 					s->pktLeft = s->hdr[0] & 0xffff;
 					s->pktTime = (uint64_t(s->hdr[3]) << 32) | s->hdr[2];
-					if (((s->hdr[0] >> 16) & FLAG_RX_DROPPED) && !s->firstPacket)
+					uint32_t pf = s->hdr[0] >> 16;
+					s->pktEob = s->flagsShared && (pf & FLAG_EOB);
+					// before 1.3 a packet from a host TX port had bit 0 = timed
+					bool dropped = (pf & FLAG_DROPPED) && (s->flagsShared || s->port == 0);
+					if (dropped && !s->firstPacket)
 						s->overflow = true;
 					s->firstPacket = false;
 				}
@@ -593,10 +754,13 @@ private:
 			s->pktTime += n;
 			s->pktLeft -= n;
 			s->pos += n;
-			if (s->pktLeft == 0)
+			if (s->pktLeft == 0) {
 				s->hdrPos = 0;
-			else
+				if (s->pktEob)
+					flags |= SOAPY_SDR_END_BURST;
+			} else {
 				flags |= SOAPY_SDR_MORE_FRAGMENTS;
+			}
 			return n;
 		}
 	}
@@ -610,7 +774,7 @@ private:
 		}
 		size_t n = std::min(std::min(numElems, s->bufferLength - s->pos - 4), size_t(0xffff));
 		bool eob = (flags & SOAPY_SDR_END_BURST) && n == numElems;
-		uint32_t pf = ((flags & SOAPY_SDR_HAS_TIME) ? FLAG_TX_TIMED : 0) | (eob ? FLAG_TX_EOB : 0);
+		uint32_t pf = ((flags & SOAPY_SDR_HAS_TIME) ? s->timedFlag : 0) | (eob ? FLAG_EOB : 0);
 		uint64_t t = (flags & SOAPY_SDR_HAS_TIME) ? SoapySDR::timeNsToTicks(timeNs, s->rate) : 0;
 		uint32_t *w = static_cast<uint32_t *>(iio_buffer_start(s->buf)) + s->pos;
 		w[0] = (HDR_MAGIC << 24) | (pf << 16) | uint32_t(n);
@@ -645,7 +809,7 @@ private:
 		if (s->cf32) {
 			float *dst = static_cast<float *>(out);
 			for (size_t j = 0; j < 2 * n; j++)
-				dst[j] = p[j] / 2048.0f;
+				dst[j] = p[j] / fullScale(s);
 		} else {
 			std::memcpy(out, p, 4 * n);
 		}
@@ -657,12 +821,18 @@ private:
 		if (s->cf32) {
 			const float *src = static_cast<const float *>(in);
 			for (size_t j = 0; j < 2 * n; j++)
-				p[j] = toDac(std::lround(src[j] * 2048.0f));
+				p[j] = toWord(s, std::lround(src[j] * fullScale(s)));
 		} else {
 			const int16_t *src = static_cast<const int16_t *>(in);
 			for (size_t j = 0; j < 2 * n; j++)
-				p[j] = toDac(src[j]);
+				p[j] = toWord(s, src[j]);
 		}
+	}
+
+	void setFlagBits(Stream *s) const
+	{
+		s->flagsShared = readRegister("FPGA", REG_VERSION) >= SHELL_VERSION_FLAGS;
+		s->timedFlag = s->flagsShared ? FLAG_TIMED : FLAG_TIMED_OLD;
 	}
 
 	void setRxEnable(bool on)
@@ -671,27 +841,157 @@ private:
 		writeRegister("FPGA", REG_CONFIG, on ? (cfg | CFG_RX_ENABLE) : (cfg & ~CFG_RX_ENABLE));
 	}
 
-	// Host port 0 is flushed and its header mode set while the port is idle:
-	// a stream that was torn down can leave a packet cut off in the shell
-	// (the DMA stops mid-transfer), which PORT_RESET clears; RX is unrouted
-	// meanwhile, and the switch reconnects it at the start of a packet.
+	// The host port is flushed and its header mode set while the port is idle:
+	// a stream that was torn down can leave a packet cut off in the shell (the
+	// DMA stops mid-transfer), which PORT_RESET clears; RX is unrouted
+	// meanwhile, and the switch reconnects it at the start of a packet. Routes
+	// the user set (e.g. through a module slot) are kept; host port 0 falls back
+	// to the RF channels where its route is empty. Host port 1 also flushes the
+	// slot it is directly connected to, which a stream stopped mid-packet leaves
+	// holding part of a packet.
 	void setPortHeaders(const Stream *s, bool on)
 	{
 		if (!shell || readRegister("FPGA", REG_VERSION) < SHELL_VERSION_HEADERS)
 			return;
-		unsigned bit = s->direction == SOAPY_SDR_RX ? CFG_HOST0_RX_HDR : CFG_HOST0_TX_HDR;
+		const HostPort &hp = HOST_PORTS[s->port];
+		bool rx = s->direction == SOAPY_SDR_RX;
+		unsigned bit = rx ? hp.rxHdr : hp.txHdr;
 		unsigned cfg = readRegister("FPGA", REG_CONFIG);
 		cfg = on ? (cfg | bit) : (cfg & ~bit);
-		if (s->direction == SOAPY_SDR_RX) {
-			writeRegister("FPGA", REG_ROUTE + 4 * SINK_HOST0_RX, ROUTE_NONE);
-			writeRegister("FPGA", REG_PORT_RESET, PORT_RESET_HOST0_RX);
+		unsigned slot = 0;
+		if (s->port == 1 && (rx ? readRegister("FPGA", REG_ROUTE + 4 * hp.rxSink) == SLOT0_SOURCE
+					: readRegister("FPGA", REG_ROUTE + 4 * SLOT0_SINK) == hp.txSource))
+			slot = PORT_RESET_SLOT0;
+		if (rx) {
+			unsigned addr = REG_ROUTE + 4 * hp.rxSink;
+			unsigned route = readRegister("FPGA", addr);
+			if (route == ROUTE_NONE && s->port == 0)
+				route = SRC_RF_RX;
+			writeRegister("FPGA", addr, ROUTE_NONE);
+			writeRegister("FPGA", REG_PORT_RESET, hp.rxReset | slot);
 			writeRegister("FPGA", REG_CONFIG, cfg);
-			writeRegister("FPGA", REG_ROUTE + 4 * SINK_HOST0_RX, SRC_RF_RX);
+			writeRegister("FPGA", addr, route);
 		} else {
-			writeRegister("FPGA", REG_PORT_RESET, PORT_RESET_HOST0_TX);
+			writeRegister("FPGA", REG_PORT_RESET, hp.txReset | slot);
 			writeRegister("FPGA", REG_CONFIG, cfg);
-			writeRegister("FPGA", REG_ROUTE + 4 * SINK_RF_TX, SRC_HOST0_TX);
+			unsigned addr = REG_ROUTE + 4 * SINK_RF_TX;
+			if (s->port == 0 && readRegister("FPGA", addr) == ROUTE_NONE)
+				writeRegister("FPGA", addr, hp.txSource);
 		}
+	}
+
+	template <typename F> void slow(F f)
+	{
+		iio_context_set_timeout(ctx, SLOW_TIMEOUT_MS);
+		try {
+			f();
+		} catch (...) {
+			iio_context_set_timeout(ctx, DEFAULT_TIMEOUT_MS);
+			throw;
+		}
+		iio_context_set_timeout(ctx, DEFAULT_TIMEOUT_MS);
+	}
+
+	// driver re-initialisation, then the standard parameters as they were
+	void initialize()
+	{
+		size_t nrx = getNumChannels(SOAPY_SDR_RX), ntx = getNumChannels(SOAPY_SDR_TX);
+		double rate = sampleRate();
+		double rxLo = getFrequency(SOAPY_SDR_RX, 0, "RF"), txLo = getFrequency(SOAPY_SDR_TX, 0, "RF");
+		double rxBw = getBandwidth(SOAPY_SDR_RX, 0), txBw = getBandwidth(SOAPY_SDR_TX, 0);
+		std::vector<std::string> rxPort, txPort, mode;
+		std::vector<double> rxGain, txGain;
+		for (size_t ch = 0; ch < nrx; ch++) {
+			rxPort.push_back(getAntenna(SOAPY_SDR_RX, ch));
+			mode.push_back(readAttr(phyChan(SOAPY_SDR_RX, ch), "gain_control_mode"));
+			rxGain.push_back(getGain(SOAPY_SDR_RX, ch));
+		}
+		for (size_t ch = 0; ch < ntx; ch++) {
+			txPort.push_back(getAntenna(SOAPY_SDR_TX, ch));
+			txGain.push_back(getGain(SOAPY_SDR_TX, ch));
+		}
+
+		slow([&] {
+			std::lock_guard<std::mutex> lock(mutex);
+			if (iio_device_debug_attr_write(phy, SETTING_INIT, "1") < 0)
+				throw std::runtime_error("GlideLink: AD9361 re-initialisation failed");
+		});
+
+		auto keep = [this](const char *key) { return written.count(key) == 0; };
+		setSampleRate(SOAPY_SDR_RX, 0, rate);
+		if (keep(DT_RX_BW))
+			setBandwidth(SOAPY_SDR_RX, 0, rxBw);
+		if (keep(DT_TX_BW))
+			setBandwidth(SOAPY_SDR_TX, 0, txBw);
+		setFrequency(SOAPY_SDR_RX, 0, "RF", rxLo, {});
+		setFrequency(SOAPY_SDR_TX, 0, "RF", txLo, {});
+		for (size_t ch = 0; ch < nrx; ch++) {
+			if (keep(DT_RX_PORT))
+				setAntenna(SOAPY_SDR_RX, ch, rxPort[ch]);
+			if (ch < 2 && keep(DT_GC_MODE[ch])) {
+				writeAttr(phyChan(SOAPY_SDR_RX, ch), "gain_control_mode", mode[ch]);
+				if (mode[ch] == "manual")
+					setGain(SOAPY_SDR_RX, ch, rxGain[ch]);
+			}
+		}
+		for (size_t ch = 0; ch < ntx; ch++) {
+			if (keep(DT_TX_PORT))
+				setAntenna(SOAPY_SDR_TX, ch, txPort[ch]);
+			if (keep(DT_TX_ATTEN))
+				setGain(SOAPY_SDR_TX, ch, txGain[ch]);
+		}
+		written.clear();
+	}
+
+	// debug attributes offered as settings ("initialize" and the register
+	// access have their own interfaces)
+	static bool isSettingAttr(const std::string &key)
+	{
+		return key != SETTING_INIT && key != "direct_reg_access";
+	}
+
+	std::vector<std::string> debugAttrs() const
+	{
+		std::vector<std::string> keys;
+		for (unsigned i = 0; i < iio_device_get_debug_attrs_count(phy); i++) {
+			std::string key = iio_device_get_debug_attr(phy, i);
+			if (isSettingAttr(key))
+				keys.push_back(key);
+		}
+		return keys;
+	}
+
+	void checkDebugAttr(const std::string &key) const
+	{
+		if (!isSettingAttr(key) || !iio_device_find_debug_attr(phy, key.c_str()))
+			throw std::runtime_error("GlideLink: unknown setting " + key);
+	}
+
+	std::string readDebug(const std::string &key) const
+	{
+		char buf[1024];
+		std::lock_guard<std::mutex> lock(mutex);
+		if (iio_device_debug_attr_read(phy, key.c_str(), buf, sizeof(buf)) < 0)
+			return "";                    // write-only attributes
+		std::string v = buf;
+		while (!v.empty() && (v.back() == '\n' || v.back() == ' '))
+			v.pop_back();
+		return v;
+	}
+
+	static std::vector<std::string> splitWords(const std::string &s)
+	{
+		std::vector<std::string> words;
+		size_t p = 0;
+		while (p < s.size()) {
+			size_t q = s.find_first_of(" \n", p);
+			if (q == std::string::npos)
+				q = s.size();
+			if (q > p)
+				words.push_back(s.substr(p, q - p));
+			p = q + 1;
+		}
+		return words;
 	}
 
 	void stopBuffer(Stream *s)
@@ -784,6 +1084,8 @@ private:
 	std::string uri;
 	iio_context *ctx = nullptr;
 	iio_device *phy = nullptr, *rxDev = nullptr, *txDev = nullptr, *shell = nullptr;
+	iio_device *host1Rx = nullptr, *host1Tx = nullptr;
+	std::set<std::string> written;  // device-tree parameters written since the last initialisation
 	mutable std::mutex mutex;
 };
 

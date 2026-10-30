@@ -3,7 +3,7 @@
 //
 // Header mode (hdr_en = 1): the stream from memory is a sequence of packets,
 // each four header words (as glidelink_host_rx) followed by length samples:
-//   word 0  {8'hA5, flags[7:0], length[15:0]}   flags bit 0 timed, bit 1 end of burst
+//   word 0  {8'hA5, flags[7:0], length[15:0]}   flags as in tuser (glidelink_shell.v)
 //   word 1  sequence number (not checked)
 //   word 2 / 3  send time [31:0] / [63:32]
 // They become switch packets with tuser = {flags, time} and tlast on the last

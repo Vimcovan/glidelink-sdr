@@ -1,0 +1,43 @@
+id: glidelink_host_sink
+label: GlideLink Host Sink
+category: '[GlideLink]'
+flags: [python, throttle]
+
+parameters:
+-   id: args
+    label: Device arguments
+    dtype: string
+    default: 'driver=glidelink'
+-   id: type
+    label: Item type
+    dtype: enum
+    options: [complex, int]
+    option_labels: [Complex (sc16 / 32768), Int (raw 32-bit words)]
+    option_attributes:
+        dtype: [complex, int]
+    default: complex
+-   id: headers
+    label: Packet headers
+    dtype: bool
+    default: 'True'
+-   id: buffer_length
+    label: Buffer length
+    dtype: int
+    default: '65536'
+
+inputs:
+-   domain: stream
+    dtype: ${ type.dtype }
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.host_sink(${args}, '${type}', ${headers}, ${buffer_length})
+
+documentation: |-
+    Host port 1 of the GlideLink PL shell: the data of the modules in the slots, routed with GlideLink Control (sink host1_rx, source host1_tx).
+
+    Complex: each 32-bit word {Q, I} as a complex number, full scale 32768. Int: the words as they are.
+
+    With packet headers the source tags rx_time (at the first sample and after a gap) and rx_eob (last sample of a burst); the sink honours tx_time (timed packet) and tx_eob (end of burst) tags.
+
+file_format: 1

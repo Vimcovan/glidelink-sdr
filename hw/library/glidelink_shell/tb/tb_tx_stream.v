@@ -44,7 +44,7 @@ module tb_tx_stream;
       for (k = 0; k < len; k = k + 1) begin
         @(posedge s_clk);
         tdata <= {~{id, k[7:0]}, id, k[7:0]};
-        tuser <= {6'd0, eob, timed, t};
+        tuser <= {5'd0, timed, eob, 1'b0, t};
         tlast <= k == len - 1;
         tvalid <= 1;
         @(posedge s_clk); while (!tready) @(posedge s_clk);

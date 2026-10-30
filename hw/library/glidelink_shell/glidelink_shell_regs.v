@@ -99,7 +99,7 @@ module glidelink_shell_regs #(
 );
 
   localparam [31:0] ID = 32'h474C4B53;
-  localparam [31:0] VERSION = 32'h00010200;    // 1.2.0: host port 1
+  localparam [31:0] VERSION = 32'h00010300;    // 1.3.0: one set of tuser flags (timed = bit 2)
 
   // ---------------------------------------------------------------------------
   // AXI4-Lite: one outstanding write and one outstanding read
