@@ -9,6 +9,18 @@ txHost = "192.168.4.1";  rxHost = "192.168.3.1";
 fs = 0.6e6;  fc = 915e6;  Rs = 10e3;  dev = 10e3;  sps = fs / Rs;
 txAtten = 40;  rxGain = 40;
 
+% AGC for this waveform (run_agc.m sets gainMode = "agc"): continuous and constant envelope (PAPR
+% 0 dB), so the slow-attack AGC, and the target can sit close to full scale for more ADC range.
+agcMode = "slow_attack";
+agcParams = {
+    "adi,agc-inner-thresh-high", 6             % target window: -6 .. -8 dBFS (no peaks above the
+    "adi,agc-inner-thresh-low", 8              %   average to leave room for)
+    "adi,agc-outer-thresh-high", 3
+    "adi,agc-outer-thresh-low", 14
+    "adi,gc-dec-pow-measurement-duration", 1024 % 1024 samples of ClkRF (4 x fs): 427 us (the power
+                                               %   is the same at every instant: no need to average long)
+    "adi,agc-gain-update-interval-us", 5000};  % one gain update per 5 ms
+
 %% waveform
 syncWord = [1 1 1 1 1 0 0 1 1 0 1 0 1 1 0 0 1 0 1 0 0 0 0 1 0 0 1 1 0 1 1 0]';
 rng(3);  payload = randi([0 1], 1000, 1);
@@ -20,13 +32,25 @@ x = x .* exp(-1j * phase(end) * (0:numel(x) - 1)' / numel(x));   % phase-continu
 papr = 10 * log10(max(abs(x) .^ 2) / mean(abs(x) .^ 2));
 
 %% boards
+if ~exist("gainMode", "var")                        % set by run_agc.m
+    gainMode = "manual";                            % "manual": the fixed gain; "agc": agcMode / agcParams
+end
 clear tx rx
 tx = glidelink.Radio(txHost);  rx = glidelink.Radio(rxHost);
 tx.config(Rate=fs, Freq=fc, Bandwidth=fs, TxAtten=txAtten);
-rx.config(Rate=fs, Freq=fc, Bandwidth=fs, RxGain=rxGain);
+rx.config(Rate=fs, Freq=fc, Bandwidth=fs);
+if gainMode == "agc"
+    agcSaved = glidelink.agcSetup(rx, agcMode, agcParams);
+else
+    rx.config(RxGain=rxGain);
+end
 tx.txCyclic(x);  pause(0.5);
 y = rx.rx(3 * fs);
+sr = rx.config();                                % gain mode / gain as read back
 tx.txStop();
+if exist("agcSaved", "var")
+    glidelink.agcRestore(rx, agcSaved);  clear agcSaved
+end
 clear tx rx
 
 %% receiver: CFO from the mean instantaneous frequency, tone energies, bit timing, sync word

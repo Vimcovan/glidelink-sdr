@@ -12,6 +12,22 @@ fc = 915e6;  txAtten = 20;  rxGain = 30;
 cfg = wlanNonHTConfig(MCS=4, PSDULength=1000);
 fs = wlanSampleRate(cfg);
 
+% AGC for this waveform (run_agc.m sets gainMode = "agc"): the configuration of the competition
+% GlideLink OFDM receiver (802.11a-like packets, from openwifi's agc_settings.sh). Fast-attack AGC:
+% it attacks the first packet, locks the gain and holds it; no unlock when a packet ends (per-packet
+% unlocking was tried on these boards and left the gain raised in some gaps, so the next packet
+% clipped). The AGC is started once packets are on the air: started on noise it locks a far too
+% high gain and holds it. Now and then it also locks too high on the packets; the competition
+% receiver restarts the AGC when its sync rate drops, here when the samples clip.
+agcMode = "fast_attack";
+agcParams = {
+    "adi,agc-inner-thresh-high", 14            % lock level -14 dBFS: OFDM peaks (PAPR about 10 dB)
+                                               %   stay about 4 dB below full scale
+    "adi,fagc-rst-gla-stronger-sig-thresh-exceeded-enable", 0};  % no unlock on a "stronger signal"
+                                               %   (10 dB above the lock level, i.e. -4 dBFS, where the
+                                               %   OFDM peaks are: a gain step inside the packet).
+                                               %   Unlock on a large ADC / LMT overload stays on.
+
 %% waveform
 rng(9);  psdu = randi([0 1], 8 * cfg.PSDULength, 1);
 x = wlanWaveformGenerator(psdu, cfg, NumPackets=1, IdleTime=100e-6);
@@ -20,17 +36,40 @@ on = abs(x) > 0;
 papr = 10 * log10(max(abs(x(on)) .^ 2) / mean(abs(x(on)) .^ 2));
 
 %% boards
+if ~exist("gainMode", "var")                        % set by run_agc.m
+    gainMode = "manual";                            % "manual": the fixed gain; "agc": agcMode / agcParams
+end
 clear tx rx
 tx = glidelink.Radio(txHost);  rx = glidelink.Radio(rxHost);
 tx.config(Rate=fs, Freq=fc, Bandwidth=18e6, TxAtten=txAtten);
-rx.config(Rate=fs, Freq=fc, Bandwidth=18e6, RxGain=rxGain);
-tx.txCyclic(x);  pause(0.5);
+rx.config(Rate=fs, Freq=fc, Bandwidth=18e6);
+tx.txCyclic(x);  pause(0.2);
+if gainMode == "agc"                             % after the packets are on the air (see above)
+    agcSaved = glidelink.agcSetup(rx, agcMode, agcParams);
+    for nRestart = 0:3                           % a minimal watchdog, as in the competition receiver
+        pause(0.1);  y0 = rx.rx(20000);         %   (there: sync rate): if the locked gain clips,
+        if max(abs([real(y0); imag(y0)])) < 0.99 %   restart the AGC (manual, then fast attack again)
+            break
+        end
+        if nRestart < 3
+            rx.config(RxGainMode="manual");  rx.config(RxGainMode=agcMode);
+        end
+    end
+else
+    rx.config(RxGain=rxGain);
+end
+pause(0.3);
 y = rx.rx(round(0.05 * fs));
+sr = rx.config();                                % gain mode / gain as read back
 tx.txStop();
+if exist("agcSaved", "var")
+    glidelink.agcRestore(rx, agcSaved);  clear agcSaved
+end
 clear tx rx
 
 %% receiver
 ind = wlanFieldIndices(cfg);
+[~, refSig] = wlanLSIG(cfg);                   % the L-SIG bits sent: rate (1-4), length (6-17)
 search = 1;  npkt = 0;  nerr = 0;  nbad = 0;  nfalse = 0;  eqAll = [];  chAll = [];  snrs = [];  cfos = [];
 while npkt < 60
     off = wlanPacketDetect(y(search:end), "CBW20");
@@ -55,9 +94,11 @@ while npkt < 60
     lltf = wlanLLTFDemodulate(seg(ind.LLTF(1):ind.LLTF(2)), cfg);
     chEst = wlanLLTFChannelEstimate(lltf, cfg);
     nVar = wlanLLTFNoiseEstimate(lltf);
-    [~, sigFail] = wlanLSIGRecover(seg(ind.LSIG(1):ind.LSIG(2)), chEst, nVar, "CBW20");
-    if sigFail                                   % parity / rate check of L-SIG failed: a false
-        nfalse = nfalse + 1;                     % detection (noise, the middle of a packet):
+    [sigBits, sigFail] = wlanLSIGRecover(seg(ind.LSIG(1):ind.LSIG(2)), chEst, nVar, "CBW20");
+    if sigFail || any(sigBits(1:17) ~= refSig(1:17))  % L-SIG fails its parity / rate check, or its
+        nfalse = nfalse + 1;                     % rate / length are not this packet's: a false detection
+                                                 % (noise, the middle of a packet; the 1-bit parity
+                                                 % passes about 1 in 16 of those):
         search = pkt + 80;                       % look again a little further on
         continue
     end

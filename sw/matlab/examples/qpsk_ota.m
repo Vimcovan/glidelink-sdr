@@ -14,6 +14,20 @@ txAtten = 30;                                    % dB: try 10 .. 60
 rxGain = 40;                                     % dB, fixed (an AGC changing the gain during the
                                                  % capture spreads the points along the radius)
 
+% AGC for this waveform (run_agc.m sets gainMode = "agc"): a continuous signal of nearly constant
+% average power, so the slow-attack AGC, which follows the average power. RRC-shaped QPSK has a
+% PAPR of about 3.5 dB: the target window is set so the peaks stay below about -7 dBFS.
+agcMode = "slow_attack";
+agcParams = {
+    "adi,agc-inner-thresh-high", 11            % target window for the average power:
+    "adi,agc-inner-thresh-low", 14             %   -11 .. -14 dBFS (1 dB steps inside it)
+    "adi,agc-outer-thresh-high", 6             % beyond -6 / -20 dBFS the gain moves in larger steps
+    "adi,agc-outer-thresh-low", 20
+    "adi,gc-dec-pow-measurement-duration", 1024 % power averaged over 1024 samples of ClkRF (4 x fs):
+                                               %   256 us, 64 symbols
+    "adi,agc-gain-update-interval-us", 5000};  % one gain update per 5 ms (the driver needs at least
+                                               %   2 measurements per update, else shortens them)
+
 %% waveform
 rng(7);  pre = pskmod(randi([0 3], 64, 1), 4, pi/4);
 rng(1);  bits = randi([0 1], 2 * 2000, 1);
@@ -27,16 +41,28 @@ x = x(n + 1:2 * n);                              % one period of the steady stat
 x = 0.7 * x / max(abs(x));
 
 %% boards
+if ~exist("gainMode", "var")                        % set by run_agc.m
+    gainMode = "manual";                            % "manual": the fixed gain; "agc": agcMode / agcParams
+end
 clear tx rx                                      % connections of an earlier run
 tx = glidelink.Radio(txHost);
 rx = glidelink.Radio(rxHost);
 tx.config(Rate=fs, Freq=fc, Bandwidth=2 * fs, TxAtten=txAtten);
-s = rx.config(Rate=fs, Freq=fc, Bandwidth=2 * fs, RxGain=rxGain);
+s = rx.config(Rate=fs, Freq=fc, Bandwidth=2 * fs);
+if gainMode == "agc"
+    agcSaved = glidelink.agcSetup(rx, agcMode, agcParams);
+else
+    rx.config(RxGain=rxGain);
+end
 tx.txCyclic(x);
 pause(0.5);
 y = rx.rx(fs);                                   % 1 s of samples
 s = rx.config();                                 % settings as read back
+sr = s;
 tx.txStop();
+if exist("agcSaved", "var")
+    glidelink.agcRestore(rx, agcSaved);  clear agcSaved
+end
 clear tx rx                                      % close the connections to the bridges
 
 %% receiver

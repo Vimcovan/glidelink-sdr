@@ -20,9 +20,33 @@ run('D:/ClaudePrj/glidelink-sdr/sw/matlab/examples/qpsk_ota.m')     % QPSK betwe
 | `timed_bursts.m` | 20 Zadoff-Chu bursts at exact hardware times, 2 MSPS | bursts scheduled ahead; spacing precision (ns), clock offset (ppm) |
 | `agc_modes.m` | the same bursts (14 dB steps) with fixed gain, slow AGC, fast AGC, fast AGC with another lock level | how each gain mode reacts (driver parameters as they are; the fast AGC's parameters are listed in the script) |
 | `run_all.m` | all of the above, one after the other | summary table |
+| `run_agc.m` | every scheme twice: the fixed gain, then the AGC configured for its waveform | summary table with the gain the AD9361 ended up with |
 
 On 2026-10-30 `run_all` gave 0 bit errors in every scheme (QPSK 440 kbit, 2-FSK 27 kbit, CSS 768
 symbols, OFDM 60 packets / 480 kbit at SNR 27.6 dB, bursts 20 of 20 with 2 ns spacing spread).
+
+## AGC per waveform
+
+Each scheme script carries an AGC configuration for its waveform (`agcMode`, `agcParams`, with the
+reason for every value in the comments); `gainMode = "agc"` before running the script selects it
+(`run_agc.m` does), otherwise the script uses its fixed gain. `glidelink.agcSetup(r, mode, params)`
+writes the driver parameters, re-initialises the AD9361 and selects the gain mode;
+`glidelink.agcRestore(r, saved)` puts parameters, gain mode and gain back at the end of the script.
+The measurement durations count samples of ClkRF (4 x the sample rate here), and the driver
+shortens a slow-AGC measurement that does not fit twice into the gain update interval.
+
+| Script | AGC | Configuration |
+|---|---|---|
+| `qpsk_ota.m` | slow attack | average power -11..-14 dBFS (PAPR about 3.5 dB), 256 us average, update every 5 ms |
+| `fsk_narrowband.m` | slow attack | -6..-8 dBFS (constant envelope), update every 5 ms |
+| `css_chirp.m` | slow attack | -6..-8 dBFS, averaged over the 4.1 ms frame gap, update every 50 ms |
+| `wlan_ofdm.m` | fast attack | as the competition OFDM receiver: lock level -14 dBFS (PAPR 10 dB), gain held after the first packet, no unlock on a stronger signal (the OFDM peaks reach lock level + 10 dB); started once packets are on the air, restarted if the samples clip |
+| `timed_bursts.m` | fast attack | lock level -8 dBFS (constant envelope), unlock in the 10 ms gaps, each burst attacked from maximum gain |
+
+On 2026-10-30 `run_agc` gave 0 errors in all ten runs (OFDM with the AGC: 60 of 60 packets at
+gain 29 dB, SNR 26.9 dB). Over repeated OFDM runs the fast AGC locked about 13 dB too high once
+in six (2 of 60 packets bad); per-packet unlocking (energy lost, then maximum or optimised gain)
+gave 0 to 59 bad packets of 60 from run to run on these boards, so it is not used.
 
 ## `glidelink.Radio`
 

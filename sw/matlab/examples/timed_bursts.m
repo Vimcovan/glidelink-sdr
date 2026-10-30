@@ -10,21 +10,45 @@ txHost = "192.168.4.1";  rxHost = "192.168.3.1";
 fs = 2e6;  fc = 915e6;  txAtten = 30;  rxGain = 40;
 nb = 20;  spacing = 10e-3;
 
+% AGC for this waveform (run_agc.m sets gainMode = "agc"): 63 us bursts every 10 ms: the fast-attack
+% AGC, unlocking in the gaps and attacking each burst from maximum gain. The Zadoff-Chu bursts have
+% a constant envelope (PAPR 0 dB), so the lock level can be near full scale. The attack takes the
+% first microseconds of each burst; for a pure timing measurement a fixed gain is equally valid.
+agcMode = "fast_attack";
+agcParams = {
+    "adi,agc-inner-thresh-high", 8             % lock level -8 dBFS
+    "adi,fagc-rst-gla-engergy-lost-sig-thresh-exceeded-enable", 1  % unlock in the 10 ms gaps (power
+                                                                   %   10 dB below the lock level)
+    "adi,fagc-gain-index-type-after-exit-rx-mode", 0               % then maximum gain
+    "adi,fagc-allow-agc-gain-increase-enable", 0};
+
 %% burst
 zc = zadoffChuSeq(25, 127);
 x = 0.7 * zc;
 
 %% boards
+if ~exist("gainMode", "var")                        % set by run_agc.m
+    gainMode = "manual";                            % "manual": the fixed gain; "agc": agcMode / agcParams
+end
 clear tx rx
 tx = glidelink.Radio(txHost);  rx = glidelink.Radio(rxHost);
 tx.config(Rate=fs, Freq=fc, Bandwidth=fs, TxAtten=txAtten);
-rx.config(Rate=fs, Freq=fc, Bandwidth=fs, RxGain=rxGain);
+rx.config(Rate=fs, Freq=fc, Bandwidth=fs);
+if gainMode == "agc"
+    agcSaved = glidelink.agcSetup(rx, agcMode, agcParams);
+else
+    rx.config(RxGain=rxGain);
+end
 t0 = tx.time() + (0.2 + 0.03 * nb) * 1e9;             % ns, TX board clock: after the queueing
                                                       % (each MATLAB request takes ~15 ms)
 for k = 0:nb - 1
     tx.txBurst(x, [], t0 + k * spacing * 1e9);        % queued, returns at once
 end
 y = rx.rx(round((0.6 + nb * spacing) * fs));          % starts before t0, ends after the last burst
+sr = rx.config();                                % gain mode / gain as read back
+if exist("agcSaved", "var")
+    glidelink.agcRestore(rx, agcSaved);  clear agcSaved
+end
 clear tx rx
 
 %% receiver: matched filter, peaks with sub-sample interpolation

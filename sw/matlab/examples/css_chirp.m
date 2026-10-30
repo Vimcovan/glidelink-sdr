@@ -11,6 +11,20 @@ txHost = "192.168.4.1";  rxHost = "192.168.3.1";
 fs = 1e6;  fc = 915e6;  BW = 125e3;  SF = 7;  N = 2 ^ SF;  os = fs / BW;
 txAtten = 40;  rxGain = 40;
 
+% AGC for this waveform (run_agc.m sets gainMode = "agc"): constant envelope (PAPR 0 dB), frames
+% of 80 ms with a 4.1 ms gap: the slow-attack AGC, target close to full scale. The power is averaged
+% over as long as the gap and the gain updated rarely, so a measurement inside the gap is rare; when
+% one happens the gain rises by one outer step (2 dB) and the 6 dB headroom of the target takes it.
+% Far below 0 dB SNR the AGC follows the noise power, which is what the ADC sees.
+agcMode = "slow_attack";
+agcParams = {
+    "adi,agc-inner-thresh-high", 6             % target window: -6 .. -8 dBFS
+    "adi,agc-inner-thresh-low", 8
+    "adi,agc-outer-thresh-high", 3
+    "adi,agc-outer-thresh-low", 14
+    "adi,gc-dec-pow-measurement-duration", 16384 % 16384 samples of ClkRF (4 x fs): 4.1 ms, the gap
+    "adi,agc-gain-update-interval-us", 50000}; % one gain update per 50 ms (under one frame)
+
 %% waveform (chip rate = BW, then interpolated to fs)
 n = (0:N - 1)';
 up = exp(1j * pi * (n .^ 2 / N - n));               % base up-chirp, -BW/2 .. BW/2
@@ -26,13 +40,25 @@ x = resample(frameChips, os, 1);                     % to fs
 x = 0.7 * x / max(abs(x));
 
 %% boards
+if ~exist("gainMode", "var")                        % set by run_agc.m
+    gainMode = "manual";                            % "manual": the fixed gain; "agc": agcMode / agcParams
+end
 clear tx rx
 tx = glidelink.Radio(txHost);  rx = glidelink.Radio(rxHost);
 tx.config(Rate=fs, Freq=fc, Bandwidth=fs, TxAtten=txAtten);
-rx.config(Rate=fs, Freq=fc, Bandwidth=fs, RxGain=rxGain);
+rx.config(Rate=fs, Freq=fc, Bandwidth=fs);
+if gainMode == "agc"
+    agcSaved = glidelink.agcSetup(rx, agcMode, agcParams);
+else
+    rx.config(RxGain=rxGain);
+end
 tx.txCyclic(x);  pause(0.5);
 y = rx.rx(fs);
+sr = rx.config();                                % gain mode / gain as read back
 tx.txStop();
+if exist("agcSaved", "var")
+    glidelink.agcRestore(rx, agcSaved);  clear agcSaved
+end
 clear tx rx
 
 %% receiver
