@@ -108,8 +108,9 @@ class jscc_rx_view(gr.basic_block):
         self.rx_host, self.interval, self.zoom = rx_host, interval, zoom
         self.ctrl = _Line(rx_host, 7022)
         self.tx = _Line(tx_host, 7020) if tx_host else None
-        self.latest = self.ref = None
+        self.latest = self.ref = self.ref_drawn = None
         self.n_img, self.status, self.on = 0, {}, True
+        self.n_shown, self.n_drawn, self.shown_fps, self.t_shown = 0, 0, 0.0, time.time()
 
         self.widget = Qt.QWidget()
         lay = Qt.QVBoxLayout(self.widget)
@@ -134,26 +135,27 @@ class jscc_rx_view(gr.basic_block):
         threading.Thread(target=self._poll, daemon=True).start()
         self.timer = Qt.QTimer()
         self.timer.timeout.connect(self._update)
-        self.timer.start(100)
+        self.timer.start(15)                            # ~60 Hz: every decoded image is drawn
 
     # background threads: TCP only, the Qt objects are touched in _update
     def _images(self):
+        need = 16 + IMG_BYTES
         while self.on:
             try:
                 s = socket.create_connection((self.rx_host, 7021), 5)
                 s.settimeout(10)
-                buf = b""
+                buf = bytearray()
                 while self.on:
-                    while len(buf) < 16 + IMG_BYTES:
+                    while len(buf) < need:
                         chunk = s.recv(1 << 20)
                         if not chunk:
                             raise ConnectionError("closed")
                         buf += chunk
                     if buf[:4] != b"JRX1":
                         raise ConnectionError("out of step")
-                    self.latest = np.frombuffer(buf[16:16 + IMG_BYTES], np.uint8).reshape(IMG, IMG, 3)
+                    self.latest = np.frombuffer(bytes(buf[16:need]), np.uint8).reshape(IMG, IMG, 3)
                     self.n_img += 1
-                    buf = buf[16 + IMG_BYTES:]
+                    del buf[:need]
             except OSError:
                 self.latest = None
                 time.sleep(2)
@@ -188,16 +190,24 @@ class jscc_rx_view(gr.basic_block):
 
     def _update(self):
         rx, ref, st = self.latest, self.ref, self.status
-        if rx is not None:
+        n = self.n_img
+        if rx is not None and n != self.n_drawn:          # draw only what is new
             self.lbl_rx.setPixmap(self._pixmap(rx))
-        if ref is not None:
+            self.n_drawn, self.n_shown = n, self.n_shown + 1
+        if ref is not None and ref is not self.ref_drawn:
             self.lbl_tx.setPixmap(self._pixmap(ref))
+            self.ref_drawn = ref
+        now = time.time()
+        if now - self.t_shown >= 1.0:
+            self.shown_fps, self.n_shown, self.t_shown = self.n_shown / (now - self.t_shown), 0, now
+        else:
+            return                                          # the status line once a second
         if not st:
             return
         if "error" in st:
             self.lbl_status.setText(st["error"])
             return
-        parts = [f"decoded {st['view_fps']:5.1f} img/s"]
+        parts = [f"received {st['view_fps']:5.1f} img/s  shown {self.shown_fps:5.1f}/s"]
         if rx is not None and ref is not None:
             mse = np.mean((rx.astype(np.float64) - ref) ** 2)
             parts.append(f"PSNR {99.0 if mse == 0 else 10 * math.log10(255 ** 2 / mse):5.2f} dB")
