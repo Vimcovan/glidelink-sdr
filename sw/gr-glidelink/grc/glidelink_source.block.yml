@@ -1,0 +1,55 @@
+id: glidelink_source
+label: GlideLink Source
+category: '[GlideLink]'
+flags: [python, throttle]
+
+parameters:
+-   id: address
+    label: Board
+    dtype: string
+    default: '192.168.3.1'
+-   id: samp_rate
+    label: Sample rate
+    dtype: real
+    default: samp_rate
+-   id: freq
+    label: Center frequency
+    dtype: real
+    default: 915e6
+-   id: bandwidth
+    label: RF bandwidth (0 = sample rate)
+    dtype: real
+    default: '0'
+-   id: gain_mode
+    label: Gain mode
+    dtype: enum
+    options: ['"manual"', '"slow_attack"', '"fast_attack"', '"hybrid"']
+    option_labels: [Manual, Slow attack AGC, Fast attack AGC, Hybrid AGC]
+    default: '"manual"'
+-   id: gain
+    label: RX gain (dB)
+    dtype: real
+    default: '40'
+
+outputs:
+-   domain: stream
+    dtype: complex
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.source(${address}, ${samp_rate}, ${freq}, ${bandwidth}, ${gain_mode}, ${gain})
+    callbacks:
+    - set_samp_rate(${samp_rate})
+    - set_freq(${freq})
+    - set_bandwidth(${bandwidth})
+    - set_gain_mode(${gain_mode})
+    - set_gain(${gain})
+
+documentation: |-
+    The receive path of a GlideLink board (AD9361, host port 0), complex samples with full scale 1.
+
+    Board: IP address of the board ('192.168.3.1'), a URI ('ip:...'), empty for the board the flowgraph runs on, or a full Soapy device string ('driver=glidelink,...').
+
+    Sample rate 0.52 to 61.44 MSPS; over the USB network link to a PC keep it near 5 MSPS or below. Center frequency 70 MHz to 6 GHz. Gain mode: the AD9361 gain control modes; the RX gain applies in manual mode. Frequency, gain and gain mode can be changed while running (variables, QT GUI Range).
+
+file_format: 1

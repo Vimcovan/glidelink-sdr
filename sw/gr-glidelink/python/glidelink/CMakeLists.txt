@@ -19,7 +19,7 @@ add_subdirectory(bindings)
 ########################################################################
 # Install python sources
 ########################################################################
-gr_python_install(FILES __init__.py control.py host_port.py modules.py jscc.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink)
+gr_python_install(FILES __init__.py rf.py control.py host_port.py modules.py jscc.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink)
 
 # the user modules' reference models and descriptions (hw/modules), used by modules.py
 set(HW_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/../../../../hw/modules)

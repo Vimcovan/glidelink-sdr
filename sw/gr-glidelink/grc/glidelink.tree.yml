@@ -1,4 +1,6 @@
 '[GlideLink]':
+- glidelink_source
+- glidelink_sink
 - glidelink_control
 - glidelink_host_source
 - glidelink_host_sink

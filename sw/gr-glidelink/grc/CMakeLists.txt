@@ -7,6 +7,8 @@
 #
 
 install(FILES
+    glidelink_source.block.yml
+    glidelink_sink.block.yml
     glidelink_control.block.yml
     glidelink_host_source.block.yml
     glidelink_host_sink.block.yml

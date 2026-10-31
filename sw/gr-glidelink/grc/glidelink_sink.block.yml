@@ -1,0 +1,46 @@
+id: glidelink_sink
+label: GlideLink Sink
+category: '[GlideLink]'
+flags: [python, throttle]
+
+parameters:
+-   id: address
+    label: Board
+    dtype: string
+    default: '192.168.4.1'
+-   id: samp_rate
+    label: Sample rate
+    dtype: real
+    default: samp_rate
+-   id: freq
+    label: Center frequency
+    dtype: real
+    default: 915e6
+-   id: bandwidth
+    label: RF bandwidth (0 = sample rate)
+    dtype: real
+    default: '0'
+-   id: atten
+    label: TX attenuation (dB)
+    dtype: real
+    default: '20'
+
+inputs:
+-   domain: stream
+    dtype: complex
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.sink(${address}, ${samp_rate}, ${freq}, ${bandwidth}, ${atten})
+    callbacks:
+    - set_samp_rate(${samp_rate})
+    - set_freq(${freq})
+    - set_bandwidth(${bandwidth})
+    - set_atten(${atten})
+
+documentation: |-
+    The transmit path of a GlideLink board (AD9361, host port 0): complex samples, |x| <= 1.
+
+    Board: as for GlideLink Source. Sample rate 0.52 to 61.44 MSPS; center frequency 47 MHz to 6 GHz; TX attenuation 0 to 89.75 dB. Frequency and attenuation can be changed while running.
+
+file_format: 1
