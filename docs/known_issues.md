@@ -47,6 +47,24 @@ Windows 中网卡的名称与对应关系可能改变；板子的地址（192.16
 - 上限 50 MSPS：第三方子卡的 TX 数据接口在 61.44 MSPS 下余量不足（`hw/README.md`），Soapy 模块拒绝更高的采样率。
 - 下限 0.52 MSPS（AD9361 加 FIR 抽取）。ADALM-Pluto 能到 65 kSPS 是因为它的 FPGA 另有抽取，移植 Pluto 例程时采样率要提高。
 
+### 2.5 FIR 已打开时换 FIR 文件，时钟链不跟着变
+
+- AD9361 驱动只在 FIR 从关到开时套用 FIR 文件里的时钟链（`RRX` / `RTX` 行）。FIR 已经打开时写 `filter_fir_config` 再写
+  `in_out_voltage_filter_fir_en=1`，驱动换上新的系数与插值 / 抽取倍数，时钟链却保持原样。
+- 桥接服务的客户端（MATLAB、GNU Radio）经 libad9361 设 20 MSPS 后，FIR 按 ×4 打开，发射时钟链是 `DAC 320 → 160 → 80 → TF 80 MHz`。
+  之后再启动脱机 DeepJSCC-Q 系统，竞赛的 ×2 FIR 装进去了，时钟链仍是 `TF 80 MHz`（应为 40 MHz），发出的信号是坏的：
+  2026-10-31 实测强信号下数据辅助 SNR 只有 7.5 dB（应为 37 dB），div2k_0802 的 PSNR 约 26 dB（应为 32.2 dB），
+  而且不随发射功率变化；接收板时钟链错时同样如此。重启后直接启动脱机系统则不受影响。
+- 守护程序（`sw/offline/glidelinkd.py`）现在先关 FIR、写文件、再打开，并核对 `rx_path_rates` / `tx_path_rates` 与文件一致，
+  不一致时启动失败。改正后同样的条件下：额外衰减 0 dB 时 PSNR 32.21 dB、数据辅助 SNR 33～37 dB。
+- 自己写 FIR 文件的程序同样要先写 `in_out_voltage_filter_fir_en=0`。
+
+### 2.6 接收端星座图显示占用解码器输入
+
+- 接收应用的 `symbols` 命令（gr-glidelink 的 JSCC RX Symbols、`jscc_video.grc` 的星座图）取符号时，主机端口 1 暂时改接 OFDM 接收机的输出，
+  解码器的输入断开。每次取符号少 2～3 幅解码图，之后还会收到 1 个 32768 字的符号包，接收应用把它记为 `bad_packets`。
+- 星座图每约 2.3 s 取一次时，解码帧率约 28.3 帧/s（OFDM 接收机仍是 30 帧/s）；需要满帧率时关掉星座图。
+
 ## 3. AGC
 
 各通信体制的 AGC 配置与实测见 [`sw/matlab/README.md`](../sw/matlab/README.md)。要点：
@@ -70,3 +88,6 @@ Windows 中网卡的名称与对应关系可能改变；板子的地址（192.16
   需复位），按同样步骤多次未复现。
 - 两板之间的调频立体声广播（MathWorks FM 例程移植版，`source = "boards"`）解调后左声道信噪比约 25 dB，不随发射功率提高，
   不经射频时为 41.6 dB。
+- 2026-10-31 脱机 DeepJSCC-Q 链路在同样衰减下，接收板 U1/U2 关闭时数据辅助 SNR 比打开时低 4～6 dB（额外衰减 20 dB：15 dB 对 22 dB）。
+  打开 U1/U2 后 USB 链路会复位（1.1），对照测量被打断，只有一组可用；同期关闭发射时接收增益在 38～47 dB 之间变化，环境本身也在变。
+  USB 3 链路常驻 U0 是否抬高 915 MHz 的底噪，尚未确定。

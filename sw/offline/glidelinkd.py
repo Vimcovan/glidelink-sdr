@@ -177,8 +177,20 @@ class Daemon:
             return
         p = self.phy
         if "fir" in c:
+            # the driver applies the file's clock chain (RRX / RTX) only when the FIR is switched on;
+            # with the FIR already on (the bridge, libad9361) it loads the new taps and interpolation
+            # but keeps the old chain (TF 80 MHz for a x2 FIR: the TX sends a broken signal)
+            p.attr("in_out_voltage_filter_fir_en", 0)
             write_file(p, self.path(c["fir"]))
             p.attr("in_out_voltage_filter_fir_en", 1)
+            for line in open(self.path(c["fir"])):
+                f = line.split()
+                if f and f[0] in ("RRX", "RTX"):
+                    want = [int(x) for x in f[1:]]
+                    have = [int(x.split(":")[1]) for x in
+                            p.attr("rx_path_rates" if f[0] == "RRX" else "tx_path_rates").split()]
+                    if have != want:
+                        raise RuntimeError(f"AD9361 {f[0]} clock chain {have}, FIR file wants {want}")
         for key, attr in (("rx_lo_hz", "out_altvoltage0_RX_LO_frequency"),
                           ("tx_lo_hz", "out_altvoltage1_TX_LO_frequency"),
                           ("rx_rf_bandwidth_hz", "in_voltage_rf_bandwidth"),
