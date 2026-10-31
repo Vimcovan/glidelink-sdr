@@ -43,6 +43,8 @@ sudo bash sw/pc/wsl-board-mtu
 （`command = bash /mnt/d/ClaudePrj/glidelink-sdr/sw/pc/wsl-board-mtu`），但只对 WSL 启动时已接上的板子有效。
 这时 WSL 中的程序按 1500 字节的帧走：接收 50 MSPS，发射约 45 MSPS；Windows 中的程序收发各 50 MSPS（`known_issues.md` 1.3）。
 
+WSL 的网络在高速时还会丢少量 UDP 包；收发 50 MSPS 用第 3 节的 Windows 原生环境。
+
 ### 1.2 软件包
 
 ```bash
@@ -103,3 +105,26 @@ wsl -u root xfce-desktop 1920x1080
 | Communications Toolbox Support Package for USRP Radio、for Analog Devices ADALM-Pluto Radio | 官方例程的文件（`glidelink.officialExample` 从中取出）；Pluto 支持包也可直接连板子 |
 
 支持包在 MATLAB 主页 → 附加功能 → 获取硬件支持包中安装（需要 MathWorks 账户），安装时的硬件设置步骤可以跳过。
+
+## 3. Windows 原生环境（收发 50 MSPS）
+
+经板子 USB 网口的 50 MSPS 采样流要在 Windows 原生程序中跑（WSL 的网络传不了巨型帧，高速时还会丢包，`known_issues.md` 1.3）。
+
+1. 安装 [radioconda](https://github.com/radioconda/radioconda-installer/releases)（Windows 版 GNU Radio、SoapySDR、libiio）。
+   例：只给当前用户装到 `D:\radioconda`，不改系统 PATH：
+
+   ```bat
+   radioconda-2025.03.14-Windows-x86_64.exe /S /InstallationType=JustMe /RegisterPython=0 /AddToPath=0 /D=D:\radioconda
+   ```
+
+2. 放入 GlideLink 的 Soapy 模块：`glidelinkSupport.dll` 复制到 `D:\radioconda\Library\lib\SoapySDR\modules0.8`
+   （自己编译见 `sw/soapy-glidelink/README.md` 的 Windows 一节）。
+3. 在 radioconda 的命令行（开始菜单 "radioconda Prompt"）中：
+
+   ```bat
+   SoapySDRUtil --probe="driver=glidelink,uri=ip:192.168.4.1"
+   SoapySDRUtil --args="driver=glidelink,uri=ip:192.168.4.1" --rate=50e6 --direction=RX
+   ```
+
+网络不用设置：板子声明巨型帧后 Windows 自动把这两块网卡的 MTU 设为 9000，Soapy 模块在 Windows 上默认用 8000 字节的 UDP 包。
+

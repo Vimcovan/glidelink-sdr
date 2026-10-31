@@ -15,7 +15,7 @@ PL（参考 RFNoC 的思路，用户可加入自己的 FPGA 模块），最终�
 | 自己的 FPGA 模块 | [`docs/design.md`](docs/design.md) 第 5 节、[`hw/modules`](hw/modules) | AXI4-Stream 模块放进外壳的槽位，软件模型与 PL 实现可互换 |
 | 脱离 PC 运行 | [`sw/offline`](sw/offline) | 守护程序加载镜像、配置射频与模块；DeepJSCC-Q 图像传输（竞赛系统）已迁移到平台上 |
 
-采样率 0.52～50 MSPS（板上）；经 USB 网口到 PC 的连续流收发各 50 MSPS（Windows 程序；WSL 中发射约 45 MSPS；板上流服务 `sw/streamd`，NCM 网卡、巨型帧），桥接服务先在板上采集再发给 PC，不受此限。
+采样率 0.52～50 MSPS（板上）；经 USB 网口到 PC 的连续流收发同时各 50 MSPS（Windows 原生程序，板上 UDP 流服务 `sw/streamd`；WSL 中发射约 48 MSPS），桥接服务先在板上采集再发给 PC，不受此限。
 
 ## 文档
 

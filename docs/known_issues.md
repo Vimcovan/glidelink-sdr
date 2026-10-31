@@ -18,28 +18,27 @@ USB 3 链路的低功耗状态 U1/U2 开着时，电脑会不时复位与板子�
 两块板的 USB 复合设备序列号都是 `0000`，Windows 无法按序列号区分，第二块板按所在端口识别。两根 USB 线交换端口后，
 Windows 中网卡的名称与对应关系可能改变；板子的地址（192.168.3.1 / 4.1）在板上固定，不受影响。
 
-### 1.3 电脑上的连续流：Windows 程序收发各 50 MSPS，WSL 中发射约 45 MSPS
+### 1.3 电脑上的连续流：Windows 原生程序收发各 50 MSPS
 
-经 USB 网口的连续流，2026-11-01 在发射板上实测（接收板的 `rx` 镜像没有发射数据通路，见 2.2，在它上面测发射会得到虚高的数字）。
-丢失看外壳计数器：接收 `HOST0_RX_OVF`（0x058），发射 `TX_UNDERFLOW`（0x044）。
+经 USB 网口的连续流，2026-11-01 实测，`SoapySDRUtil --rate` 50 MSPS。发射只在发射板上测（接收板的 `rx` 镜像没有发射数据通路，
+见 2.2，在它上面测发射会得到虚高的数字）。丢失看外壳计数器：接收 `HOST0_RX_OVF`（0x058），发射 `TX_UNDERFLOW`（0x044）。
 
 | 方式 | 接收 | 发射 | 收发同时 |
 |---|---|---|---|
 | RNDIS 网卡 + iiod（原来） | 20 MSPS 无丢失，上限约 25 MSPS | 未在发射板上测 | |
-| NCM（16 KB 传输）+ glidelink-streamd | 50 MSPS | 40～52 MSPS，不稳定 | 合计约 255 MB/s |
-| NCM（64 KB 传输，巨型帧 MTU 9000）+ glidelink-streamd，Windows 程序 | 50 MSPS 跟满 | 50 MSPS | 各 50 MSPS |
-| 同上，WSL 中的程序（WSL 的 MTU 1500，见下） | 50 MSPS 跟满 | 约 45 MSPS | |
-
-Windows 程序的计数器在每次测试中只增加个位数到几十（流开始与结束时），不随测试时长增加。
+| NCM 网卡 + glidelink-streamd（UDP），Windows 原生（8000 字节的包） | 49.6～49.8 MSPS，溢出只在开始时 1 次 | 49.9 MSPS，板上丢包 0 | 收 49.1～49.7、发 50.0 MSPS |
+| 同上，WSL（1472 字节的包） | 49.3～49.5 MSPS | 约 48 MSPS，丢少量包 | |
 
 - 板上的改动：网卡功能 RNDIS → NCM（`os/board/install_net.sh`）；NCM 每次 USB 传输 16 KB → 约 64 KB（内核补丁 0003）；
-  最大帧长 1514 → 9014 字节（补丁 0004，usb0 的 MTU 9000）；采样流经 `sw/streamd`，不经 iiod；USB 中断在 CPU 0，收包协议处理分到 CPU 1～3。
-  电脑端 Windows 的 NCM 驱动按板子声明的帧长自动把这两块网卡的 MTU 设为 9000，不用手动改。
-- WSL（镜像网络模式）：WSL 中的网卡也显示 MTU 9000，但大于 1500 字节的帧在 Windows 与 WSL 之间被丢掉（WSL 中 `ping -M do -s 4000` 不通，
-  Windows 中通）。WSL 的程序按 9000 通告分段长度，板子发来的大段被丢，连接卡住：iiod 连不上、采样流断开。把 WSL 中这两块网卡的
-  MTU 设为 1500 即恢复（`docs/pc_setup.md`），这时 WSL 的连接按 1500 字节的帧走，发射约 45 MSPS。
-- 采样流服务的连接在对端 5 s 不应答时结束（`TCP_USER_TIMEOUT`），不再长时间占住 IIO 缓冲（之前出现过"Device or resource busy"）。
-- 被强行终止的 Soapy 程序（如 `timeout` 杀掉的 `SoapySDRUtil`）不会关闭流，主机端口 0 的包头模式（`CONFIG` 位 2 / 3）会留着；
+  最大帧长 1514 → 9014 字节（补丁 0004，usb0 的 MTU 9000）；NCM 网卡声明校验和卸载、IPv4 UDP 校验和写 0（补丁 0005），
+  板上发包可用 UDP 分段卸载；采样流经 `sw/streamd` 的 UDP 流，不经 iiod；USB 中断在 CPU 0，收包协议处理分到 CPU 1～3。
+  电脑端 Windows 的 NCM 驱动按板子声明的帧长自动把这两块网卡的 MTU 设为 9000。
+- USB 链路与 Windows 的 NCM 驱动不丢包、不乱序（Windows 原生客户端发射 138 万个包，板上全部按序收到）。
+- WSL（镜像网络模式）：Windows 与 WSL 之间不传大于 1500 字节的帧（WSL 中网卡显示 MTU 9000，`ping -M do -s 4000` 不通），
+  并且高速时会丢 UDP 包、偶有乱序（约 0.2 %，板上没有丢，丢在到达板子之前）。WSL 中要先把连板子的网卡设为 MTU 1500
+  （`sw/pc/wsl-board-mtu`，见 `docs/pc_setup.md`），这时只能用 1472 字节的包，发射到不了 50 MSPS；高采样率用 Windows 原生程序。
+- 1472 字节的包收发同时各 50 MSPS 时板上每秒要收约 14 万个包，发射约 43、接收约 40 MSPS；8000 字节的包没有这个问题。
+- 被强行终止的 Soapy 程序（如被杀掉的 `SoapySDRUtil`）不会关闭流，主机端口 0 的包头模式（`CONFIG` 位 2 / 3）会留着；
   之后的原始数据流在发射方向会被当成无效包头丢掉，数字虚高。
 - 第 2 阶段（U1/U2 关闭之前）经 iiod 只有约 5 MSPS 无丢失、上限 7.3 MSPS。
 

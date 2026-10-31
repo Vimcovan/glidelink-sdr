@@ -25,7 +25,10 @@ SoapySDR 模块，经 libiio 访问 ADI 的 ad9361 / cf_axi_adc / cf_axi_dds 驱
     格式 CS16（12 位样点，满量程 2048，TX 写入时左移 4 位对齐 DAC）与 CF32。
   - 主机端口 1（流参数 `port=1`，外壳 1.2 起）：槽位中模块的数据，32 位字原样作为 CS16（CF32 满量程 32768），一个通道。
     路由由用户经 `FPGA` 寄存器或 gr-glidelink 的控制块设定。
-  - `transport`：经网络时采样走 `auto`（板上有 glidelink-streamd 时用它，默认）、`iiod`（libiio 缓冲区）或 `streamd`（`sw/streamd`，连续的 TCP 流，不等应答）；`connections` 为 streamd 一条流分用的 TCP 连接数（1～4，默认 3，每条连接一个收发线程）。设置与寄存器始终经 libiio。
+  - `transport`：经网络时采样走 `auto`（板上有 glidelink-streamd 时用它，默认）、`iiod`（libiio 缓冲区）或 `streamd`（`sw/streamd`，UDP 流，
+    客户端在 `streamd_udp.hpp`）。设置与寄存器始终经 libiio。`frameSize` 为 UDP 包的字节数（含 16 字节包头）；0（默认）按平台取：
+    Windows 8000（板子的 USB 网口用巨型帧），Linux 取连接的路径 MTU 减 28、至多 8000（WSL 中为 1472）。UDP 流中丢了包时，
+    原始模式下 `readStream` 先返回一次 `SOAPY_SDR_OVERFLOW`，包头模式下丢掉当前的包、在下一个包头处接上。
   - `bufferLength` 为每个 IIO 缓冲区的样点数（默认 65536），TX 在缓冲区写满或带 `END_BURST` 时提交。RX 的 DMA 按整块交付，
     原始模式下不满一块的尾巴要等后续数据。
   - 外壳 1.1 起默认走包头（流参数 `headers=false` 关闭）：`readStream` 给出 `timeNs`，包头中的丢包标志变为 `SOAPY_SDR_OVERFLOW`，
@@ -37,11 +40,14 @@ SoapySDR 模块，经 libiio 访问 ADI 的 ad9361 / cf_axi_adc / cf_axi_dds 驱
 - 采样率上限 50 MSPS（第三方子卡的 TX 接口余量，见 `hw/README.md`）。
 - 网络：PC 上用 `uri=ip:<板子>`，经板上的 iiod。iiod 只在启动时扫描设备，`hw/scripts/load_overlay.sh` 加载叠加后会重启它。
   libiio 超时 1 s，可能更慢的操作（改采样率换 FIR 最长约 1.4 s、写驱动参数、重新初始化）临时放宽到 10 s，
-  否则经网络时超时会断开与 iiod 的连接。经板子的 USB 网口实测：经 iiod 收、发各 20 MSPS 无丢失；经 glidelink-streamd 收发各 50 MSPS（Windows 程序；WSL 中发射约 45 MSPS，`docs/known_issues.md` 1.3）。
+  否则经网络时超时会断开与 iiod 的连接。经板子的 USB 网口实测：经 iiod 收、发各 20 MSPS 无丢失；经 glidelink-streamd，
+  Windows 原生程序收发同时各 50 MSPS，WSL 中接收 50、发射约 48 MSPS（`docs/known_issues.md` 1.3）。
 
 ## 构建
 
-依赖 libiio（0.23）与 SoapySDR（0.8），在板上直接编译：
+### Linux（板上、WSL）
+
+依赖 libiio（0.23 起）与 SoapySDR（0.8），在板上直接编译：
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -49,6 +55,21 @@ cmake --build build -j4
 sudo cmake --install build
 SoapySDRUtil --probe="driver=glidelink"
 ```
+
+### Windows
+
+模块要和 SoapySDR 用同一种编译器：radioconda / conda-forge 的 SoapySDR 用 MSVC 编译，所以模块也用 MSVC。依赖：
+
+- [radioconda](https://github.com/radioconda/radioconda-installer/releases)（含 Windows 版 GNU Radio、SoapySDR 0.8、libiio）；
+- Visual Studio 2022 生成工具，只需 C++ 的 MSVC x64 与一个 Windows SDK（只有编译模块时需要，使用者不需要）。
+
+```bat
+sw\soapy-glidelink\build_win.bat install D:\radioconda
+```
+
+生成 `build-win\glidelinkSupport.dll`，`install` 把它复制到 `<radioconda>\Library\lib\SoapySDR\modules0.8`。
+不复制时可设环境变量 `SOAPY_SDR_PLUGIN_PATH` 指向 `build-win`。radioconda 中没有 CMake，脚本直接调用 `cl`；
+装了 CMake 时 `CMakeLists.txt` 同样可用（libiio 经 pkg-config 或直接找 `iio.h` / `libiio.lib`）。
 
 ## 测试
 

@@ -1,0 +1,46 @@
+--- a/drivers/usb/gadget/function/f_ncm.c
++++ b/drivers/usb/gadget/function/f_ncm.c
+@@ -17,6 +17,8 @@
+ #include <linux/device.h>
+ #include <linux/etherdevice.h>
+ #include <linux/crc32.h>
++#include <linux/ip.h>
++#include <linux/udp.h>
+ 
+ #include <linux/usb/cdc.h>
+ 
+@@ -1013,6 +1015,24 @@
+ 		__le16		*ntb_ndp;
+ 		int		dgram_pad;
+ 
++		/*
++		 * GlideLink: the net device offers checksum offload (NETIF_F_HW_CSUM, set in
++		 * ncm_alloc_inst), so that UDP segmentation offload (UDP_SEGMENT) can be used for
++		 * sample streams. The checksum is finished here: an IPv4 UDP checksum becomes 0
++		 * ("no checksum", allowed by RFC 768 and what the FPGA of network USRPs sends),
++		 * everything else is computed in software as without the offload.
++		 */
++		if (skb->ip_summed == CHECKSUM_PARTIAL) {
++			if (skb->protocol == htons(ETH_P_IP) && ip_hdr(skb)->protocol == IPPROTO_UDP &&
++			    skb->csum_offset == offsetof(struct udphdr, check)) {
++				*(__sum16 *)(skb_checksum_start(skb) + skb->csum_offset) = 0;
++				skb->ip_summed = CHECKSUM_NONE;
++			} else if (skb_checksum_help(skb)) {
++				dev_kfree_skb_any(skb);
++				return NULL;
++			}
++		}
++
+ 		unsigned	max_size = ncm->port.fixed_in_len;
+ 		const struct ndp_parser_opts *opts = ncm->parser_opts;
+ 		const int ndp_align = le16_to_cpu(ntb_parameters.wNdpInAlignment);
+@@ -1638,6 +1658,9 @@
+ 		kfree(opts);
+ 		return ERR_CAST(net);
+ 	}
++	/* GlideLink: checksum offload, finished in ncm_wrap_ntb (no scatter-gather: linear skbs) */
++	opts->net->hw_features |= NETIF_F_HW_CSUM;
++	opts->net->features |= NETIF_F_HW_CSUM;
+ 	INIT_LIST_HEAD(&opts->ncm_os_desc.ext_prop);
+ 
+ 	descs[0] = &opts->ncm_os_desc;

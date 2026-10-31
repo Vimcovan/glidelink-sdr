@@ -69,7 +69,7 @@ PL 块的橙色端口像 RFNoC 块一样在 GRC 中直接连线：连线就是 P
 示例：`sw/gr-glidelink/examples/ota_qpsk.grc`（两板之间的 QPSK，频谱、瀑布图、同步前后的星座）、`pl_fft_spectrum.grc`
 （射频 → NCO → FFT 全在 PL 内，20 MSPS 的频谱以每 KEEP 帧一帧送到电脑，需 `dsp` 镜像）、`agc_fast_attack.grc`、`jscc_link_console.grc`。不经 GRC 的脚本在 `sw/gnuradio/`。
 
-电脑上的 GNU Radio 经 USB 网口连续传输，单块板收发各 50 MSPS（Windows 中的程序；WSL 中发射约 45 MSPS；板上流服务 `glidelink-streamd`，Soapy 模块默认使用）；更高的采样率在 PL 中先做处理或抽取（如 FFT 模块的 KEEP），或在板上运行流程图（`uri=local:` 或板子地址留空）。
+电脑上的 GNU Radio 经 USB 网口连续传输，单块板收发同时各 50 MSPS（Windows 原生程序，见 `pc_setup.md` 第 3 节；WSL 中发射约 48 MSPS；板上 UDP 流服务 `glidelink-streamd`，Soapy 模块默认使用）；更高的采样率在 PL 中先做处理或抽取（如 FFT 模块的 KEEP），或在板上运行流程图（`uri=local:` 或板子地址留空）。
 电脑端的安装与图形桌面见 [`pc_setup.md`](pc_setup.md)。
 
 ### 3.3 视频经离线图传链路
@@ -131,7 +131,7 @@ Communications Toolbox Support Package for ADALM-Pluto 可以按地址连接板�
 | 采样率 | 0.52～50 MSPS（第三方子卡的 TX 接口在 61.44 MSPS 时余量不足，见 `hw/README.md`） |
 | 射频 | AD9361：70 MHz～6 GHz（发射 47 MHz 起），带宽至 56 MHz；每块板 1 收 1 发 |
 | 板上收发 | 50 MSPS 全双工逐样点无误（C 程序、桥接服务的 C 采集） |
-| 经 USB 网口的连续流 | Windows 程序收发各 50 MSPS（可同时）；WSL 中接收 50、发射约 45 MSPS |
+| 经 USB 网口的连续流 | Windows 原生程序收发同时各 50 MSPS；WSL 中接收 50、发射约 48 MSPS |
 | 发→收固定延迟 | 56 个采样（同一块板，数字滤波与 FIFO） |
 
 已知问题与注意事项见 [`known_issues.md`](known_issues.md)。

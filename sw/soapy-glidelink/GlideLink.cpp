@@ -13,10 +13,10 @@
 // unchanged as CS16 (full scale 32768 for CF32).
 //
 // Over the network the samples go either through iiod (libiio buffers) or, where
-// the board runs glidelink-streamd (sw/streamd), through its continuous TCP
-// streams: stream argument transport = auto (streamd when it answers), iiod or
-// streamd. iiod waits a round trip per buffer and tops out near 130 MB/s over the
-// USB network link; streamd keeps the link busy (docs/known_issues.md 1.3).
+// the board runs glidelink-streamd (sw/streamd), through its UDP streams
+// (streamd_udp.hpp): stream argument transport = auto (streamd when it answers),
+// iiod or streamd. iiod waits a round trip per buffer and tops out near 130 MB/s
+// over the USB network link; streamd reaches 50 MSPS each way (docs/known_issues.md 1.3).
 
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Formats.hpp>
@@ -24,22 +24,15 @@
 #include <SoapySDR/Registry.hpp>
 #include <SoapySDR/Time.hpp>
 #include <iio.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
+
+#include "streamd_udp.hpp"
 
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
-#include <condition_variable>
 #include <cstring>
-#include <deque>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -62,112 +55,9 @@ const unsigned DEFAULT_TIMEOUT_MS = 1000;
 // network, an expired timeout drops the connection to iiod
 const unsigned SLOW_TIMEOUT_MS = 10000;
 const double TX_ATTEN_MAX = 89.75;             // dB, TX gain = 89.75 + hardwaregain
-const char *STREAMD_PORT = "7040";             // glidelink-streamd (sw/streamd)
-const uint32_t STREAMD_MAGIC = 0x31534C47;     // "GLS1"
-const unsigned STREAMD_KBUFS = 8;              // kernel buffers on the board
+const unsigned STREAMD_KBUFS = 8;              // kernel buffers on the board (glidelink-streamd)
 
 std::string chanName(size_t i) { return "voltage" + std::to_string(i); }
-
-// One glidelink-streamd connection with its own thread, so that the connections of a
-// stream move data at the same time: RX, the thread receives the buffers of its
-// connection into a queue; TX, it sends the buffers queued for it. Buffers are swapped,
-// not copied, between the queue and the stream's current buffer.
-struct StreamdConn {
-	struct Buf {
-		std::vector<char> data;
-		size_t len = 0;
-	};
-	int fd = -1;
-	bool rx = true;
-	size_t bufBytes = 0;
-	static const size_t DEPTH = 4;      // buffers queued per connection
-	std::thread th;
-	std::mutex m;
-	std::condition_variable cv;
-	std::deque<Buf> q;                  // RX: received, TX: to send
-	std::vector<std::vector<char>> spare;
-	bool stop = false, error = false, busy = false;
-
-	std::vector<char> take()            // a spare buffer (caller holds m)
-	{
-		if (spare.empty())
-			return std::vector<char>(bufBytes);
-		std::vector<char> b = std::move(spare.back());
-		spare.pop_back();
-		return b;
-	}
-
-	void run()
-	{
-		for (;;) {
-			std::unique_lock<std::mutex> lock(m);
-			if (rx) {
-				cv.wait(lock, [&] { return stop || q.size() < DEPTH; });
-				if (stop)
-					return;
-				Buf b;
-				b.data = take();
-				lock.unlock();
-				uint32_t hdr[2];
-				bool ok = recvFull(hdr, sizeof hdr) && hdr[0] == 0x31534C47 && hdr[1] <= bufBytes &&
-					  recvFull(b.data.data(), hdr[1]);
-				lock.lock();
-				if (!ok) {
-					error = true;
-					cv.notify_all();
-					return;
-				}
-				b.len = hdr[1];
-				q.push_back(std::move(b));
-				cv.notify_all();
-			} else {
-				cv.wait(lock, [&] { return stop || !q.empty(); });
-				if (q.empty())
-					return;                 // stopped with nothing left to send
-				Buf b = std::move(q.front());
-				q.pop_front();
-				busy = true;
-				lock.unlock();
-				uint32_t hdr[2] = {0x31534C47, uint32_t(b.len)};
-				bool ok = sendFull(hdr, sizeof hdr) && sendFull(b.data.data(), b.len);
-				lock.lock();
-				busy = false;
-				spare.push_back(std::move(b.data));
-				cv.notify_all();
-				if (!ok) {
-					error = true;
-					return;
-				}
-			}
-		}
-	}
-
-	bool recvFull(void *p, size_t n)
-	{
-		char *c = static_cast<char *>(p);
-		while (n) {
-			ssize_t k = recv(fd, c, n, 0);
-			if (k <= 0)
-				return false;
-			c += k;
-			n -= k;
-		}
-		return true;
-	}
-
-	bool sendFull(const void *p, size_t n)
-	{
-		const char *c = static_cast<const char *>(p);
-		while (n) {
-			ssize_t k = send(fd, c, n, MSG_NOSIGNAL);
-			if (k <= 0)
-				return false;
-			c += k;
-			n -= k;
-		}
-		return true;
-	}
-};
 
 struct Stream {
 	int direction;
@@ -198,15 +88,14 @@ struct Stream {
 	bool pktCut = false;            // RX: the current part was cut off, the packet goes on
 	bool rxShifted = false;         // RX, host port 0: samples arrive shifted left by 4 (shell >= 1.5)
 
-	// transport: libiio buffer (buf) or glidelink-streamd connections (socks)
+	// transport: libiio buffer (buf) or a glidelink-streamd UDP stream (sd)
 	std::string transport = "auto";
-	unsigned conns = 3;             // streamd connections; buffer i goes over connection i mod conns
+	size_t frameSize = 0;           // streamd UDP packet bytes; 0: by platform (streamd_udp.hpp)
 	std::vector<std::string> scan;  // the IIO channels of the stream, for streamd
-	std::vector<int> socks;
-	std::vector<std::unique_ptr<StreamdConn>> workers;   // streamd: one per connection
+	std::unique_ptr<streamd::Stream> sd;
 	std::vector<char> local;        // streamd: the current buffer
 	size_t step = 0;                // bytes per sample in the buffer
-	size_t next = 0;                // streamd: connection of the next buffer
+	bool lost = false;              // streamd RX: packets lost, report an overflow first
 };
 
 const uint32_t HDR_MAGIC = 0xA5;
@@ -624,16 +513,17 @@ public:
 		tr.value = "auto";
 		tr.name = "Transport";
 		tr.description = "Over the network: iiod (libiio buffers), streamd (glidelink-streamd on the board, "
-				 "continuous TCP streams, for high rates) or auto (streamd when the board runs it).";
+				 "UDP streams, for high rates) or auto (streamd when the board runs it).";
 		tr.type = SoapySDR::ArgInfo::STRING;
 		tr.options = {"auto", "iiod", "streamd"};
-		SoapySDR::ArgInfo nc;
-		nc.key = "connections";
-		nc.value = "3";
-		nc.name = "streamd connections";
-		nc.description = "TCP connections a streamd stream is spread over (1 to 4).";
-		nc.type = SoapySDR::ArgInfo::INT;
-		return {len, hdr, port, tr, nc};
+		SoapySDR::ArgInfo fs;
+		fs.key = "frameSize";
+		fs.value = "0";
+		fs.name = "streamd packet bytes";
+		fs.description = "UDP packet size of a streamd stream, header included; 0: 8000 on Windows (jumbo "
+				 "frames), the path MTU less 28 on Linux (1472 in WSL).";
+		fs.type = SoapySDR::ArgInfo::INT;
+		return {len, hdr, port, tr, fs};
 	}
 
 	SoapySDR::Stream *setupStream(const int dir, const std::string &format,
@@ -656,9 +546,9 @@ public:
 		it = args.find("transport");
 		if (it != args.end())
 			s->transport = it->second;
-		it = args.find("connections");
+		it = args.find("frameSize");
 		if (it != args.end())
-			s->conns = std::max(1ul, std::min(4ul, std::stoul(it->second)));
+			s->frameSize = std::stoul(it->second);
 		if (s->transport != "auto" && s->transport != "iiod" && s->transport != "streamd") {
 			delete s;
 			throw std::runtime_error("GlideLink: transport auto, iiod or streamd");
@@ -800,6 +690,10 @@ public:
 			if (ret < 0)
 				return ret;
 		}
+		if (s->lost) {
+			s->lost = false;
+			return SOAPY_SDR_OVERFLOW;            // the samples follow on the next call
+		}
 		size_t n = std::min(numElems, s->avail - s->pos);
 		const int16_t *src = static_cast<const int16_t *>(bufStart(s)) + 2 * s->numSlots * s->pos;
 		for (size_t i = 0; i < s->channels.size(); i++) {
@@ -887,7 +781,7 @@ private:
 
 	int refill(Stream *s)
 	{
-		if (!s->socks.empty())
+		if (s->sd)
 			return refillStreamd(s);
 		ssize_t ret = iio_buffer_refill(s->buf);
 		if (ret < 0)
@@ -897,188 +791,59 @@ private:
 		return 0;
 	}
 
-	static bool active(const Stream *s) { return s->buf || !s->socks.empty(); }
+	static bool active(const Stream *s) { return s->buf || s->sd; }
 
-	static void *bufStart(Stream *s) { return s->socks.empty() ? iio_buffer_start(s->buf) : s->local.data(); }
+	static void *bufStart(Stream *s) { return s->sd ? s->local.data() : iio_buffer_start(s->buf); }
 
-	// glidelink-streamd: s->conns connections to the board's port 7040, the stream
-	// set up over the first (sw/streamd/glidelink_streamd.c)
+	// glidelink-streamd: a UDP stream with the board (streamd_udp.hpp, sw/streamd)
 	bool openStreamd(Stream *s)
 	{
-		std::string host = uri.substr(3);
-		addrinfo hints = {}, *res = nullptr;
-		hints.ai_socktype = SOCK_STREAM;
-		if (getaddrinfo(host.c_str(), STREAMD_PORT, &hints, &res) != 0)
-			return false;
-		auto connectOne = [&]() {
-			int fd = socket(res->ai_family, SOCK_STREAM, 0);
-			if (fd < 0)
-				return -1;
-			int sz = 16 << 20, one = 1;
-			setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sz, sizeof sz);
-			setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
-			setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-			if (connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
-				close(fd);
-				return -1;
-			}
-			return fd;
-		};
-		auto fail = [&](const std::string &why) {
-			if (!why.empty())
-				SoapySDR::logf(SOAPY_SDR_WARNING, "GlideLink: streamd: %s", why.c_str());
-			for (int fd : s->socks)
-				close(fd);
-			s->socks.clear();
-			freeaddrinfo(res);
-			return false;
-		};
-		int fd = connectOne();
-		if (fd < 0)
-			return fail(s->transport == "streamd" ? "cannot connect" : "");
-		s->socks.push_back(fd);
 		std::string names;
 		for (const auto &c : s->scan)
 			names += (names.empty() ? "" : ",") + c;
-		std::string req = std::string("GLS1 ") + (s->direction == SOAPY_SDR_RX ? "rx " : "tx ") +
-				  iio_device_get_name(s->dev) + " " + std::to_string(s->bufferLength) + " " +
-				  std::to_string(STREAMD_KBUFS) + " " + names + " " + std::to_string(s->conns) + "\n";
-		std::string reply;
-		if (!sendAll(fd, req.data(), req.size()) || !readLine(fd, reply) || reply.compare(0, 3, "OK ") != 0)
-			return fail(reply.empty() ? "no reply" : reply);
-		unsigned long step = 0;
-		int id = 0;
-		if (sscanf(reply.c_str(), "OK %lu %d", &step, &id) != 2)
-			return fail(reply);
-		for (unsigned k = 1; k < s->conns; k++) {
-			int fk = connectOne();
-			if (fk < 0)
-				return fail("cannot open connection " + std::to_string(k));
-			s->socks.push_back(fk);
-			std::string join = "GLS1 join " + std::to_string(id) + " " + std::to_string(k) + "\n";
-			if (!sendAll(fk, join.data(), join.size()) || !readLine(fk, reply) || reply != "OK")
-				return fail("connection " + std::to_string(k) + ": " + reply);
+		std::string err;
+		s->sd = streamd::Stream::open(uri.substr(3), s->direction == SOAPY_SDR_RX, iio_device_get_name(s->dev),
+					      s->bufferLength, STREAMD_KBUFS, names, s->frameSize, err);
+		if (!s->sd) {
+			if (s->transport == "streamd" || err != "cannot connect")
+				SoapySDR::logf(SOAPY_SDR_WARNING, "GlideLink: streamd: %s", err.c_str());
+			return false;
 		}
-		freeaddrinfo(res);
-		s->step = step;
-		s->local.assign(s->bufferLength * step, 0);
-		s->next = 0;
-		for (int fk : s->socks) {
-			auto w = std::make_unique<StreamdConn>();
-			w->fd = fk;
-			w->rx = s->direction == SOAPY_SDR_RX;
-			w->bufBytes = s->local.size();
-			StreamdConn *wp = w.get();
-			w->th = std::thread([wp] { wp->run(); });
-			s->workers.push_back(std::move(w));
-		}
+		s->step = s->sd->step();
+		s->local.assign(s->sd->bufBytes(), 0);
+		s->lost = false;
 		return true;
 	}
 
-	static bool sendAll(int fd, const void *p, size_t n)
-	{
-		const char *c = static_cast<const char *>(p);
-		while (n) {
-			ssize_t k = send(fd, c, n, MSG_NOSIGNAL);
-			if (k <= 0)
-				return false;
-			c += k;
-			n -= k;
-		}
-		return true;
-	}
-
-	// read n bytes: waits up to timeoutMs for the first (0: none came), then for the rest
-	static int recvAll(int fd, void *p, size_t n, int timeoutMs)
-	{
-		char *c = static_cast<char *>(p);
-		size_t got = 0;
-		while (got < n) {
-			pollfd pf = {fd, POLLIN, 0};
-			int r = poll(&pf, 1, got == 0 ? timeoutMs : 10000);
-			if (r == 0)
-				return got == 0 ? 0 : -1;
-			if (r < 0)
-				return -1;
-			ssize_t k = recv(fd, c + got, n - got, 0);
-			if (k <= 0)
-				return -1;
-			got += k;
-		}
-		return 1;
-	}
-
-	static bool readLine(int fd, std::string &line)
-	{
-		line.clear();
-		char ch;
-		while (recvAll(fd, &ch, 1, 5000) == 1) {
-			if (ch == '\n')
-				return true;
-			line += ch;
-		}
-		return false;
-	}
-
-	// RX: the next buffer from the connection it comes over (its thread received it)
+	// RX: the next buffer of the UDP stream; packets lost in it are reported as an overflow
 	int refillStreamd(Stream *s)
 	{
-		StreamdConn &w = *s->workers[s->next];
-		std::unique_lock<std::mutex> lock(w.m);
-		if (!w.cv.wait_for(lock, std::chrono::milliseconds(DEFAULT_TIMEOUT_MS),
-				   [&] { return !w.q.empty() || w.error; }))
+		bool lost = false;
+		long n = s->sd->take(s->local, DEFAULT_TIMEOUT_MS, lost);
+		if (n == 0)
 			return SOAPY_SDR_TIMEOUT;
-		if (w.q.empty())
+		if (n < 0)
 			return SOAPY_SDR_STREAM_ERROR;
-		StreamdConn::Buf b = std::move(w.q.front());
-		w.q.pop_front();
-		std::swap(s->local, b.data);            // the old current buffer goes back as a spare
-		w.spare.push_back(std::move(b.data));
-		w.cv.notify_all();
-		lock.unlock();
-		s->next = (s->next + 1) % s->workers.size();
-		s->avail = b.len / s->step;
+		if (lost) {
+			if (s->headers) {               // drop the packet in progress, resynchronise on a header
+				s->overflow = true;
+				s->hdrPos = 0;
+				s->pktLeft = 0;
+			} else {
+				s->lost = true;
+			}
+		}
+		s->avail = size_t(n) / s->step;
 		s->pos = 0;
 		return 0;
 	}
 
-	// TX: queue the current buffer for its connection's thread
+	// TX: queue the current buffer for the UDP stream
 	int pushStreamd(Stream *s)
 	{
-		StreamdConn &w = *s->workers[s->next];
-		std::unique_lock<std::mutex> lock(w.m);
-		if (!w.cv.wait_for(lock, std::chrono::milliseconds(SLOW_TIMEOUT_MS),
-				   [&] { return w.q.size() < StreamdConn::DEPTH || w.error; }))
-			return SOAPY_SDR_TIMEOUT;
-		if (w.error)
-			return SOAPY_SDR_STREAM_ERROR;
-		StreamdConn::Buf b;
-		b.len = s->pos * s->step;
-		b.data = w.take();
-		std::swap(s->local, b.data);            // a spare becomes the buffer to fill next
-		w.q.push_back(std::move(b));
-		w.cv.notify_all();
-		lock.unlock();
-		s->next = (s->next + 1) % s->workers.size();
+		int r = s->sd->put(s->local, s->pos * s->step, SLOW_TIMEOUT_MS);
 		s->pos = 0;
-		return 0;
-	}
-
-	// end the streamd stream: TX, what is queued is sent first
-	static void closeStreamd(Stream *s)
-	{
-		for (auto &w : s->workers) {
-			std::unique_lock<std::mutex> lock(w->m);
-			if (!w->rx)
-				w->cv.wait_for(lock, std::chrono::seconds(10), [&] { return (w->q.empty() && !w->busy) || w->error; });
-			w->stop = true;
-			w->cv.notify_all();
-		}
-		for (auto &w : s->workers)
-			shutdown(w->fd, SHUT_RDWR);         // a thread blocked in recv / send returns
-		for (auto &w : s->workers)
-			w->th.join();
-		s->workers.clear();
+		return r == 0 ? 0 : r == -2 ? SOAPY_SDR_TIMEOUT : SOAPY_SDR_STREAM_ERROR;
 	}
 
 	// header mode: one channel, so one buffer word per sample or header word
@@ -1171,7 +936,7 @@ private:
 	{
 		if (s->pos == 0)
 			return 0;
-		if (!s->socks.empty())
+		if (s->sd)
 			return pushStreamd(s);
 		ssize_t ret = s->pos == s->bufferLength ? iio_buffer_push(s->buf)
 							: iio_buffer_push_partial(s->buf, s->pos);
@@ -1417,10 +1182,7 @@ private:
 		if (s->buf)
 			iio_buffer_destroy(s->buf);
 		s->buf = nullptr;
-		closeStreamd(s);
-		for (int fd : s->socks)
-			close(fd);
-		s->socks.clear();
+		s->sd.reset();                      // TX: sends what is queued, then ends the stream
 		s->pos = s->avail = 0;
 	}
 

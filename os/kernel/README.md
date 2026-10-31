@@ -47,6 +47,10 @@ AD9361、AXI ADC / DDS、AXI DMAC 与 IIO DMA 缓冲（均编进内核），以�
   逐帧开销降到约六分之一，单纯 TCP 两个方向都到约 370～390 MB/s。WSL 镜像网络不传大于 1500 字节的帧，WSL 中要把这两块网卡的
   MTU 设为 1500（`docs/pc_setup.md`）。
 
+- `0005-usb-gadget-ncm-csum-offload-udp.patch`：NCM 网卡声明校验和卸载（`NETIF_F_HW_CSUM`，不声明分散聚集），在打包进 NTB 前补完：
+  IPv4 UDP 的校验和写 0（RFC 768 允许，网口 USRP 的 FPGA 也这样），其余（TCP 等）照常在软件中算。这样板上发 UDP 可以用分段卸载
+  （`UDP_SEGMENT`，没有卸载时内核拒绝），`sw/streamd` 发 1472 字节的包时板上单核约 257 MB/s，逐包发送约 150 MB/s。
+
 安装到 SD 卡：`image.ub` 放到启动分区（原文件另存为 `image.ub.pynq-6.6.10`；两块板上
 `image.ub.cached-mmap-20261029` 为加入补丁 0002 之前的内核），模块放到根文件系统的
 `/lib/modules/6.6.0-adi-glidelink/`，zocl 与 wilc-sdio 放到其中的 `updates/` 并运行 `depmod`。
