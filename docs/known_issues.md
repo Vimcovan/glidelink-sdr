@@ -2,18 +2,16 @@
 
 ## 1. 连接
 
-### 1.1 接收板的 USB 链路偶尔断开
+### 1.1 USB 链路的 U1/U2 已关闭
 
-现象：电脑与接收板之间的连接断开约 1 s 后恢复：MATLAB 等客户端报连接错误，板上串口控制台（ttyGS0）被挂断，Windows 重新识别网络
-（NetworkProfile 事件 4003），紧接着电脑重新做 DHCP 续租。没有重新枚举，Windows 的系统日志中没有 USB 记录。
-2026-10-30 在使用中出现两次（间隔约 24 分钟）；发射板在同一时期没有出现。
+USB 3 链路的低功耗状态 U1/U2 开着时，电脑会不时复位与板子之间的 USB 链路：断开约 1 s 后恢复，客户端报连接错误，板上串口控制台
+（ttyGS0）被挂断，Windows 重新识别网络（NetworkProfile 事件 4003）并重新做 DHCP 续租；没有重新枚举，Windows 系统日志中没有 USB 记录。
+两块板都工作在 USB 3 超高速，板上 dwc3 控制器开着 USB 3 链路电源管理（设备树 `snps,usb3_lpm_capable`）时，空闲链路 98 % 的时间处于 U2，
+约每秒经过一次 Recovery（DSTS 寄存器的链路状态，0xFE200000 + 0xC70C 的位 21:18）。
 
-分析：板上与电脑上的记录同时发生且没有重新枚举，相当于主机对 USB 端口做了一次复位。两块板都工作在 USB 3 超高速；
-板上 dwc3 控制器开着 USB 3 链路电源管理（设备树 `snps,usb3_lpm_capable`），空闲时链路 98 % 的时间处于 U2，约每秒经过一次
-Recovery（DSTS 寄存器的链路状态，0xFE200000 + 0xC70C 的位 21:18）。U1/U2 的频繁进出是这类控制器已知的不稳定来源。
-
-处理：接收板的启动设备树中加了 `snps,dis-u1-entry-quirk`、`snps,dis-u2-entry-quirk`（2026-10-31），链路一直处于 U0。
-此后在约 21 MB/s 的连续传输下观察中，结果更新在本节。原镜像保存在接收板 `/root/boot-backup/image.ub.u1u2-on`。
+两块板的启动设备树因此加了 `snps,dis-u1-entry-quirk`、`snps,dis-u2-entry-quirk`（`os/kernel/make_image_ub.sh`），链路一直处于 U0。
+对照（2026-10-31，同一 12 小时，两块板都在连续传输）：关闭 U1/U2 的接收板 0 次断开，开着 U1/U2 的发射板 2 次（此前接收板在使用中 24 分钟内断开 2 次）。
+原镜像保存在两块板的 `/root/boot-backup/image.ub.u1u2-on`。
 
 ### 1.2 两块板的 USB 序列号相同
 

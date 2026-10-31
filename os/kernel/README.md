@@ -9,7 +9,7 @@ AD9361、AXI ADC / DDS、AXI DMAC 与 IIO DMA 缓冲（均编进内核），以�
 | 脚本 | 作用 |
 |---|---|
 | `build_kernel.sh` | 在 `/root/sdr/linux`（ADI `adi-6.6.0` 源码）中配置并编译 Image 与模块，安装到 `/root/sdr/modroot` |
-| `make_image_ub.sh` | 用 Image 与 PYNQ 原 `image.ub` 中的设备树打包新的 `image.ub`（FIT：kernel + fdt，加载地址 0x80000，与 PYNQ 相同） |
+| `make_image_ub.sh` | 用 Image 与 PYNQ 原 `image.ub` 中的设备树打包新的 `image.ub`（FIT：kernel + fdt，加载地址 0x80000，与 PYNQ 相同）；设备树中给 USB 控制器（dwc3）加 `snps,dis-u1-entry-quirk`、`snps,dis-u2-entry-quirk`，关闭 USB 3 链路的 U1/U2（开着时电脑会不时复位 USB 链路，见 `docs/known_issues.md` 1.1），并留 8 KB 余量给 U-Boot 修改设备树 |
 | `build_zocl.sh` | 针对新内核编译 XRT `202410.2.17.319` 的 zocl（PYNQ 的 DMA 缓冲分配依赖它） |
 | `build_wilc.sh` | 编译板载 WiFi（WILC3000）驱动 `wilc-sdio.ko` |
 | `build_glidelink.sh` | 编译 `glidelink/` 中的平台驱动：`glidelink_shell.ko`（外壳寄存器窗口作为 IIO 设备 `glidelink-shell`，libiio 经 `iio_device_reg_read/write` 访问，属性 `timestamp` 为采样计数器）；`glidelink_host.ko`（主机端口 1 的两个 DMA 作为 IIO 缓冲设备 `glidelink-host1-rx` / `-tx`，各一个 32 位通道）。装到 `updates/` 并 `depmod`，设备树叠加加入节点时自动加载 |
