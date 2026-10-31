@@ -31,6 +31,18 @@ sudo env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
     apt-get -o Acquire::http::Proxy=false install <包>
 ```
 
+板子的 USB 网卡用巨型帧（MTU 9000，`os/board/install_net.sh`），Windows 自动把这两块网卡的 MTU 设为 9000，WSL 镜像过来的网卡也显示 9000，
+但 Windows 与 WSL 之间不传大于 1500 字节的帧。不改的话 WSL 中的程序连板子会卡住（iiod 连不上、采样流断开）。
+每次 WSL 启动或板子重新接上后，在 WSL 中把连板子的网卡设为 1500：
+
+```bash
+sudo bash sw/pc/wsl-board-mtu
+```
+
+脚本找出地址在 192.168.3.x / 192.168.4.x 的网卡并设为 MTU 1500。也可以写进 `/etc/wsl.conf` 的 `[boot]` 段
+（`command = bash /mnt/d/ClaudePrj/glidelink-sdr/sw/pc/wsl-board-mtu`），但只对 WSL 启动时已接上的板子有效。
+这时 WSL 中的程序按 1500 字节的帧走：接收 50 MSPS，发射约 45 MSPS；Windows 中的程序收发各 50 MSPS（`known_issues.md` 1.3）。
+
 ### 1.2 软件包
 
 ```bash

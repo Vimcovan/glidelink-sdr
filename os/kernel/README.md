@@ -42,6 +42,11 @@ AD9361、AXI ADC / DDS、AXI DMAC 与 IIO DMA 缓冲（均编进内核），以�
   每块最多 64 个以太网帧（原 32）。16 KB 时收发合计约 230 MB/s 封顶（每秒上万次传输），板上 CPU 与电脑端都不是瓶颈；
   电脑端的 NCM 驱动按板子声明的上限选择块长，不需要改动。
 
+- `0004-usb-gadget-ncm-jumbo-frames.patch`：NCM 声明的最大帧长（`wMaxSegmentSize`）由 1514 改为 9014 字节，
+  板上 usb0 的 MTU 设为 9000（`os/board/install_net.sh`）。电脑端 Windows 的 NCM 驱动据此自动把网卡 MTU 设为 9000；
+  逐帧开销降到约六分之一，单纯 TCP 两个方向都到约 370～390 MB/s。WSL 镜像网络不传大于 1500 字节的帧，WSL 中要把这两块网卡的
+  MTU 设为 1500（`docs/pc_setup.md`）。
+
 安装到 SD 卡：`image.ub` 放到启动分区（原文件另存为 `image.ub.pynq-6.6.10`；两块板上
 `image.ub.cached-mmap-20261029` 为加入补丁 0002 之前的内核），模块放到根文件系统的
 `/lib/modules/6.6.0-adi-glidelink/`，zocl 与 wilc-sdio 放到其中的 `updates/` 并运行 `depmod`。

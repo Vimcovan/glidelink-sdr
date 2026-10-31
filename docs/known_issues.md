@@ -18,25 +18,30 @@ USB 3 链路的低功耗状态 U1/U2 开着时，电脑会不时复位与板子�
 两块板的 USB 复合设备序列号都是 `0000`，Windows 无法按序列号区分，第二块板按所在端口识别。两根 USB 线交换端口后，
 Windows 中网卡的名称与对应关系可能改变；板子的地址（192.168.3.1 / 4.1）在板上固定，不受影响。
 
-### 1.3 电脑上的连续流：接收约 50 MSPS，发射约 40～50 MSPS
+### 1.3 电脑上的连续流：Windows 程序收发各 50 MSPS，WSL 中发射约 45 MSPS
 
-经 USB 网口的连续流（GNU Radio、GQRX、Soapy 程序），2026-11-01 实测。接收的数字在两块板上都测过，发射只在发射板上测
-（接收板的 `rx` 镜像没有发射数据通路，见 2.2；在接收板上测发射会得到虚高的数字）。
+经 USB 网口的连续流，2026-11-01 在发射板上实测（接收板的 `rx` 镜像没有发射数据通路，见 2.2，在它上面测发射会得到虚高的数字）。
+丢失看外壳计数器：接收 `HOST0_RX_OVF`（0x058），发射 `TX_UNDERFLOW`（0x044）。
 
-| 方式 | 接收 | 发射 |
-|---|---|---|
-| RNDIS 网卡 + iiod（原来） | 20 MSPS 无丢失，上限约 25 MSPS | 未在发射板上测 |
-| NCM 网卡 + iiod | 上限 32.7 MSPS | 未在发射板上测 |
-| NCM 网卡（每次传输约 64 KB）+ glidelink-streamd（现在的默认） | 50 MSPS 跟满（Soapy：开始几秒有溢出，之后不再增加） | 40～52 MSPS，10 s 内欠载数个到上百个 |
+| 方式 | 接收 | 发射 | 收发同时 |
+|---|---|---|---|
+| RNDIS 网卡 + iiod（原来） | 20 MSPS 无丢失，上限约 25 MSPS | 未在发射板上测 | |
+| NCM（16 KB 传输）+ glidelink-streamd | 50 MSPS | 40～52 MSPS，不稳定 | 合计约 255 MB/s |
+| NCM（64 KB 传输，巨型帧 MTU 9000）+ glidelink-streamd，Windows 程序 | 50 MSPS 跟满 | 50 MSPS | 各 50 MSPS |
+| 同上，WSL 中的程序（WSL 的 MTU 1500，见下） | 50 MSPS 跟满 | 约 45 MSPS | |
 
-- 原来的网卡功能 RNDIS 每个以太网帧一次 USB 传输，单纯 TCP 约 77 MB/s 就被板上的 USB 中断线程单核占满；两块板已改用 NCM
-  （`os/board/install_net.sh`），并把 NCM 每次 USB 传输的上限由 16 KB 加到约 64 KB（`os/kernel/patches/0003`）。
-- iiod 每块缓冲一问一答并在用户空间多拷贝一次；Soapy 模块经网络时默认改用 `sw/streamd` 的连续流（流参数 `transport`、`connections`）。
-- 电脑→板子方向：板上负责收包协议处理的软中断线程（`ksoftirqd/N`）所在的核占满；收发同时合计约 255 MB/s 封顶。
-- 第 2 阶段（U1/U2 关闭之前）经 iiod 只有约 5 MSPS 无丢失、上限 7.3 MSPS。更高的采样率在 PL 中先处理或抽取（如 FFT 模块的 KEEP），
-  或用桥接服务（板上采集后发回），或在板上运行。
-- 测量时注意：被强行终止的 Soapy 程序（如 `timeout` 杀掉的 `SoapySDRUtil`）不会关闭流，主机端口 0 的包头模式（`CONFIG` 位 2 / 3）会留着；
+Windows 程序的计数器在每次测试中只增加个位数到几十（流开始与结束时），不随测试时长增加。
+
+- 板上的改动：网卡功能 RNDIS → NCM（`os/board/install_net.sh`）；NCM 每次 USB 传输 16 KB → 约 64 KB（内核补丁 0003）；
+  最大帧长 1514 → 9014 字节（补丁 0004，usb0 的 MTU 9000）；采样流经 `sw/streamd`，不经 iiod；USB 中断在 CPU 0，收包协议处理分到 CPU 1～3。
+  电脑端 Windows 的 NCM 驱动按板子声明的帧长自动把这两块网卡的 MTU 设为 9000，不用手动改。
+- WSL（镜像网络模式）：WSL 中的网卡也显示 MTU 9000，但大于 1500 字节的帧在 Windows 与 WSL 之间被丢掉（WSL 中 `ping -M do -s 4000` 不通，
+  Windows 中通）。WSL 的程序按 9000 通告分段长度，板子发来的大段被丢，连接卡住：iiod 连不上、采样流断开。把 WSL 中这两块网卡的
+  MTU 设为 1500 即恢复（`docs/pc_setup.md`），这时 WSL 的连接按 1500 字节的帧走，发射约 45 MSPS。
+- 采样流服务的连接在对端 5 s 不应答时结束（`TCP_USER_TIMEOUT`），不再长时间占住 IIO 缓冲（之前出现过"Device or resource busy"）。
+- 被强行终止的 Soapy 程序（如 `timeout` 杀掉的 `SoapySDRUtil`）不会关闭流，主机端口 0 的包头模式（`CONFIG` 位 2 / 3）会留着；
   之后的原始数据流在发射方向会被当成无效包头丢掉，数字虚高。
+- 第 2 阶段（U1/U2 关闭之前）经 iiod 只有约 5 MSPS 无丢失、上限 7.3 MSPS。
 
 ## 2. 射频
 

@@ -3,7 +3,8 @@
 #  - the USB gadget's network function: NCM instead of RNDIS (PYNQ /usr/local/bin/usbgadget,
 #    original kept as usbgadget.rndis). NCM puts many Ethernet frames in one USB transfer, so
 #    the board takes far fewer USB interrupts (RNDIS: one transfer per frame).
-#  - after usb0 is up (same script): the USB controller's interrupt on CPU 0, and the network
+#  - after usb0 is up (same script): MTU 9000 (jumbo frames, kernel patch 0004; set the PC side
+#    too), the USB controller's interrupt on CPU 0, and the network
 #    protocol work of usb0's received packets (ACKs, and the sending they trigger) on CPUs 1-3
 #    (receive packet steering), so that it does not pile up on the interrupt's core.
 #  - TCP buffer limits (/etc/sysctl.d/90-glidelink-net.conf): the default 208 KB receive limit
@@ -38,7 +39,9 @@ if grep -q rndis $G || ! grep -q '^ifconfig usb0 ' $G; then
 fi
 cat >> $G <<'EOF'
 
-# GlideLink (os/board/install_net.sh): USB interrupt on CPU 0, usb0 protocol work on CPUs 1-3
+# GlideLink (os/board/install_net.sh): jumbo frames (kernel patch 0004; the PC side's MTU must
+# be raised too), USB interrupt on CPU 0, usb0 protocol work on CPUs 1-3
+ip link set usb0 mtu 9000 || true
 for irq in $(awk '/dwc3/ { sub(":", "", $1); print $1 }' /proc/interrupts); do
   echo 0 > /proc/irq/$irq/smp_affinity_list
 done

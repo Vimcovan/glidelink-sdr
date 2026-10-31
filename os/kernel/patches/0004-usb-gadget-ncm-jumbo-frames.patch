@@ -1,0 +1,12 @@
+--- a/drivers/usb/gadget/function/f_ncm.c
++++ b/drivers/usb/gadget/function/f_ncm.c
+@@ -188,7 +188,8 @@
+ 	/* this descriptor actually adds value, surprise! */
+ 	/* .iMACAddress = DYNAMIC */
+ 	.bmEthernetStatistics =	cpu_to_le32(0), /* no statistics */
+-	.wMaxSegmentSize =	cpu_to_le16(ETH_FRAME_LEN),
++	/* GlideLink: jumbo frames (MTU 9000) for 200 MB/s streams; was ETH_FRAME_LEN */
++	.wMaxSegmentSize =	cpu_to_le16(9000 + ETH_HLEN),
+ 	.wNumberMCFilters =	cpu_to_le16(0),
+ 	.bNumberPowerFilters =	0,
+ };

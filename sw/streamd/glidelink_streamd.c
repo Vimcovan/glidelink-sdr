@@ -298,6 +298,10 @@ static void *client(void *arg)
 	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sz, sizeof sz);
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+	// a client that stops answering (cable pulled, PC asleep, frames dropped on the way) ends the
+	// stream after 5 s instead of holding the IIO buffer for TCP's retransmission minutes
+	unsigned int user_timeout = 5000;
+	setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &user_timeout, sizeof user_timeout);
 
 	if (read_line(fd, line, sizeof line) < 0) {
 		close(fd);
