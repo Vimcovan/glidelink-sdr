@@ -5,7 +5,7 @@
 %   addpath('D:/ClaudePrj/glidelink-sdr/sw/matlab');  run_agc
 
 here = fileparts(mfilename("fullpath"));
-scripts = ["qpsk_ota", "fsk_narrowband", "css_chirp", "wlan_ofdm", "timed_bursts"];
+scripts = ["qpsk_ota", "fsk_narrowband", "css_chirp", "wlan_ofdm", "otfs_ota", "timed_bursts"];
 modes = ["manual", "agc"];
 agcSummary = table('Size', [0 7], 'VariableTypes', ["string", "string", "double", "double", "double", "double", ...
     "string"], 'VariableNames', ["Scheme", "Gain", "RxGain_dB", "Frames", "Bits", "Errors", "Metrics"]);

@@ -16,6 +16,7 @@ run('D:/ClaudePrj/glidelink-sdr/sw/matlab/examples/qpsk_ota.m')     % 两块板�
 | `fsk_narrowband.m` | 2-FSK，10 kBd，0.6 MSPS | 窄带、恒包络（峰均比 0 dB），非相干检测 |
 | `css_chirp.m` | 线性调频扩频 SF7，125 kHz，1 MSPS | 恒包络、扩频；调频信号的时频图 |
 | `wlan_ofdm.m` | 802.11a/g 16-QAM 3/4，20 MSPS（WLAN 工具箱） | 宽带、高峰均比（10 dB）、带空闲间隔的包；信道估计 |
+| `otfs_ota.m` | OTFS 64×32（时延 1 µs、多普勒 488 Hz 分辨率），QPSK，1 Msymbol/s，根升余弦成形、射频 4 MSPS | 时延-多普勒域的嵌入式导频与保护区、按门限读出路径（增益、时延、多普勒）、整帧 LMMSE 均衡；可在发射端加入合成的 3 径双选信道（`emulateChannel`），图中给出时延-多普勒信道估计、单抽头校正与均衡后的星座 |
 | `timed_bursts.m` | 20 个 Zadoff-Chu 突发，按硬件时间精确发送，2 MSPS | 提前排定的突发；间隔精度（ns）、时钟偏差（ppm） |
 | `agc_modes.m` | 同一串突发（功率相差 14 dB），分别用固定增益、慢速 AGC、快速 AGC、换一个锁定电平的快速 AGC | 各增益模式的反应（驱动参数保持原样，快速 AGC 的可调参数列在脚本里） |
 | `run_all.m` | 依次运行以上全部 | 汇总表 |
@@ -84,6 +85,7 @@ USRP Radio 和 for Analog Devices ADALM-Pluto Radio。
 | `fsk_narrowband.m` | 慢速 | −6～−8 dBFS（恒包络），每 5 ms 更新一次 |
 | `css_chirp.m` | 慢速 | −6～−8 dBFS，平均时长等于 4.1 ms 的帧间空隙，每 50 ms 更新一次 |
 | `wlan_ofdm.m` | 快速 | 同竞赛 OFDM 接收机：锁定电平 −14 dBFS（峰均比 10 dB），第一包锁定后保持，关闭强信号解锁（OFDM 峰值可达锁定电平 +10 dB）；包开始发送后再启动 AGC，采样削顶时重启 |
+| `otfs_ota.m` | 慢速 | 平均功率 −16～−19 dBFS（峰均比约 10 dB，另有加强的导频），平均 1 ms（半帧），每 10 ms 更新一次 |
 | `timed_bursts.m` | 快速 | 锁定电平 −8 dBFS（恒包络），10 ms 间隔内解锁，每个突发从最大增益重新攻击 |
 
 2026-10-30 `run_agc` 十组全部 0 误码（OFDM 用 AGC 时 60 包全对，增益 29 dB，信噪比 26.9 dB）。

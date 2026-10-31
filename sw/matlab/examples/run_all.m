@@ -6,7 +6,7 @@
 % Each example leaves a struct "result" (name, frames, bits, errors, metric) and its figure.
 
 here = fileparts(mfilename("fullpath"));
-scripts = ["qpsk_ota", "fsk_narrowband", "css_chirp", "wlan_ofdm", "timed_bursts", "agc_modes"];
+scripts = ["qpsk_ota", "fsk_narrowband", "css_chirp", "wlan_ofdm", "otfs_ota", "timed_bursts", "agc_modes"];
 summary = table('Size', [0 5], 'VariableTypes', ["string", "double", "double", "double", "string"], ...
     'VariableNames', ["Scheme", "Frames", "Bits", "Errors", "Metrics"]);
 for sname = scripts
