@@ -176,6 +176,11 @@ class Daemon:
         if not c:
             return
         p = self.phy
+        if "rx_gain_mode" in c:
+            # before the FIR: switching the FIR on recalibrates the receiver, and a mode change
+            # after that (slow_attack at boot -> fast_attack) left the RX path ~20 dB weaker at the
+            # AGC (gain index ~50 instead of ~29 at the same signal, a quarter of the frames lost)
+            p.attr("in_voltage0_gain_control_mode", c["rx_gain_mode"])
         if "fir" in c:
             # the driver applies the file's clock chain (RRX / RTX) only when the FIR is switched on;
             # with the FIR already on (the bridge, libad9361) it loads the new taps and interpolation
