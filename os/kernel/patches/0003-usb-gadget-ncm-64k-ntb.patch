@@ -1,0 +1,27 @@
+--- a/drivers/usb/gadget/function/f_ncm.c	2026-11-01 00:55:05.756406944 +0900
++++ b/drivers/usb/gadget/function/f_ncm.c	2026-11-01 00:55:05.772413249 +0900
+@@ -90,6 +90,15 @@
+  */
+ #define NTB_DEFAULT_IN_SIZE	16384
+ #define NTB_OUT_SIZE		16384
++/*
++ * GlideLink: up to 64 KB per NTB (one USB transfer) for 200 MB/s streams over USB 3:
++ * with 16 KB blocks the gadget tops out near 230 MB/s in both directions together.
++ * IN stays below 64 KB for the 16-bit block length of NTB16.
++ */
++#undef NTB_DEFAULT_IN_SIZE
++#undef NTB_OUT_SIZE
++#define NTB_DEFAULT_IN_SIZE	65024
++#define NTB_OUT_SIZE		65536
+ 
+ /* Allocation for storing the NDP, 32 should suffice for a
+  * 16k packet. This allows a maximum of 32 * 507 Byte packets to
+@@ -98,7 +107,7 @@
+  * Smaller packets are not likely to be trying to maximize the
+  * throughput and will be mstly sending smaller infrequent frames.
+  */
+-#define TX_MAX_NUM_DPE		32
++#define TX_MAX_NUM_DPE		64	/* GlideLink: 64 KB NTBs (was 32) */
+ 
+ /* Delay for the transmit to wait before sending an unfilled NTB frame. */
+ #define TX_TIMEOUT_NSECS	300000

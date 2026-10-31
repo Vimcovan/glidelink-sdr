@@ -37,6 +37,11 @@ AD9361、AXI ADC / DDS、AXI DMAC 与 IIO DMA 缓冲（均编进内核），以�
   Pluto 支持包 `sdrrx` 读 1 MSPS、240 帧无全 0 帧；`sw/tests/ramp_loopback_iio.c` 全双工数字回环
   30.72 / 50 MSPS、内核块数 4～32，逐样点无误，TX 无欠载、无缺失缓冲。
 
+- `0003-usb-gadget-ncm-64k-ntb.patch`：USB 设备端 NCM 网卡（`f_ncm`，板子经 USB 线连电脑的网口，`os/board/install_net.sh`）
+  每次 USB 传输（NTB）的上限由 16 KB 加到约 64 KB：发送 65024 字节（NTB16 的块长字段只有 16 位），接收 65536 字节，
+  每块最多 64 个以太网帧（原 32）。16 KB 时收发合计约 230 MB/s 封顶（每秒上万次传输），板上 CPU 与电脑端都不是瓶颈；
+  电脑端的 NCM 驱动按板子声明的上限选择块长，不需要改动。
+
 安装到 SD 卡：`image.ub` 放到启动分区（原文件另存为 `image.ub.pynq-6.6.10`；两块板上
 `image.ub.cached-mmap-20261029` 为加入补丁 0002 之前的内核），模块放到根文件系统的
 `/lib/modules/6.6.0-adi-glidelink/`，zocl 与 wilc-sdio 放到其中的 `updates/` 并运行 `depmod`。

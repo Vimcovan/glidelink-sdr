@@ -18,14 +18,18 @@ cd sw/streamd && bash install.sh
 
 编译、安装 systemd 服务 `glidelink-streamd`（开机启动，运行在 CPU 1～3，USB 中断在 CPU 0，见 `os/board/install_net.sh`）。
 
-## 实测（2026-11-01，接收板，电脑端 WSL 中的 `SoapySDRUtil --rate`，默认 2 条连接）
+## 实测（2026-11-01，发射板，内核补丁 0003 之后：NCM 每次 USB 传输至多约 64 KB）
 
-| 方向 | 设定 | 实得 | 丢失 |
-|---|---|---|---|
-| 接收 | 20 / 40 MSPS | 19.9 / 39.8 MSPS | 无 |
-| 接收 | 50 MSPS | 44.5 MSPS | 溢出 |
-| 发射 | 20 / 40 MSPS | 20 / 41 MSPS | 无 |
-| 发射 | 50 MSPS | 45～51 MSPS，维持不住 | 欠载 |
-| 收发同时 | 各 40 MSPS | 收 30、发 28 MSPS | 溢出 |
+接收在接收板与发射板上都测过；发射只能在发射板上测（接收板的 `rx` 镜像中主机端口 0 没有接到 DAC，`docs/known_issues.md` 2.2）。
+丢失看外壳计数器：接收 `HOST0_RX_OVF`（0x058），发射 `TX_UNDERFLOW`（0x044）。
 
-此时板上 CPU 未占满（四核合计约 60 %），限制在 NCM 链路层：收发合计约 230 MB/s 封顶（`docs/known_issues.md` 1.3）。
+| 测法 | 结果 |
+|---|---|
+| 接收 50 MSPS，C 客户端，1～4 条连接 | 200 MB/s，跟满（`HOST0_RX_OVF` 每次 +13～30，多半在开始 / 结束时） |
+| 接收 50 MSPS，`SoapySDRUtil`（默认 3 条连接） | 49.5～49.7 MSPS，溢出只在开始的几秒 |
+| 发射 50 MSPS，C 客户端，1 / 2 / 3 / 4 条连接 | 48.0 / 50.05 / 51.1 / 51.4 MSPS，10 s 内欠载 +154 / +79 / +4 / +7 |
+| 发射 50 MSPS，Soapy（Python，262144 个采样的缓冲，3 条连接） | 40～52 MSPS，每次结果不同，10 s 内欠载 +3～+99 |
+| 发射 50 MSPS，`SoapySDRUtil`（65536 个采样的缓冲） | 26～33 MSPS |
+| 收发同时各 50 MSPS，C 客户端，各 3 条连接 | 收 41、发 22.7 MSPS，合计约 255 MB/s |
+
+接收已能跟满 50 MSPS；电脑→板子方向还不稳定（板上一个软中断线程 `ksoftirqd/N` 占满一核），收发同时合计约 255 MB/s 封顶。
