@@ -47,6 +47,6 @@ templates:
 documentation: |-
     The transmit path of a GlideLink board (AD9361, host port 0): complex samples, |x| <= 1.
 
-    Board: as for GlideLink Source. Sample rate 0.52 to 50 MSPS (over the USB network link up to 20 MSPS without loss); center frequency 47 MHz to 6 GHz; TX attenuation 0 to 89.75 dB. Frequency and attenuation can be changed while running.
+    Board: as for GlideLink Source. Sample rate 0.52 to 50 MSPS (over the USB network link about 40 MSPS without loss); center frequency 47 MHz to 6 GHz; TX attenuation 0 to 89.75 dB. Frequency and attenuation can be changed while running.
 
 file_format: 1

@@ -1,0 +1,12 @@
+[Unit]
+Description=GlideLink sample streams over TCP (port 7040)
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/glidelink_streamd 7040
+Restart=on-failure
+# its own core next to the USB interrupt thread (os/board/install_net.sh pins that to CPU 0)
+CPUAffinity=1 2 3
+
+[Install]
+WantedBy=multi-user.target

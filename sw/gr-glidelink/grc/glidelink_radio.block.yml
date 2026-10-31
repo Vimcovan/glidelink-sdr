@@ -66,6 +66,6 @@ templates:
 documentation: |-
     The RF of a GlideLink board as the PL sees it, as the RFNoC radio block: output rf_rx (the AD9361 RX samples), input rf_tx (to the AD9361 TX). Connect them to other PL ports (orange); the samples stay in the PL, no data passes through GNU Radio.
 
-    Sample rate 0.52 to 50 MSPS: the PL handles the full rate, a host port over the USB network link up to 20 MSPS without loss. TX frequency 0 puts the TX LO 10 MHz above the RX LO, out of the RX band. Settings can be changed while running.
+    Sample rate 0.52 to 50 MSPS: the PL handles the full rate, a host port over the USB network link about 40 MSPS without loss. TX frequency 0 puts the TX LO 10 MHz above the RX LO, out of the RX band. Settings can be changed while running.
 
 file_format: 1

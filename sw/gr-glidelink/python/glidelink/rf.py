@@ -26,7 +26,7 @@ class source(gr.hier_block2):
     """GlideLink Source: received samples of a board's AD9361.
 
     address    board ('192.168.3.1', 'ip:...', '' for the board this runs on, or a Soapy string)
-    samp_rate  0.52 .. 50 MSPS (over the USB network link to a PC: up to 20 MSPS without loss)
+    samp_rate  0.52 .. 50 MSPS (over the USB network link to a PC: about 40 MSPS without loss)
     freq       RX LO, 70 MHz .. 6 GHz
     bandwidth  RF filter bandwidth; 0: the sample rate
     gain_mode  'manual', 'slow_attack', 'fast_attack', 'hybrid' (the AD9361 gain control modes)
@@ -76,7 +76,7 @@ class sink(gr.hier_block2):
     """GlideLink Sink: samples to transmit on a board's AD9361 (complex, |x| <= 1).
 
     address    board, as for the source
-    samp_rate  0.52 .. 50 MSPS (over the USB network link: up to 20 MSPS without loss)
+    samp_rate  0.52 .. 50 MSPS (over the USB network link: about 40 MSPS without loss)
     freq       TX LO, 47 MHz .. 6 GHz
     bandwidth  RF filter bandwidth; 0: the sample rate
     atten      TX attenuation, 0 .. 89.75 dB

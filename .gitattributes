@@ -7,3 +7,4 @@ sw/offline/profiles/* text eol=lf
 sw/offline/config/* text eol=lf
 sw/bridge/*.service text eol=lf
 sw/pc/* text eol=lf
+sw/streamd/*.service text eol=lf
