@@ -1,0 +1,18 @@
+#!/bin/bash
+# XFCE desktop in a window on the Windows desktop (WSLg): a nested X server (Xephyr) on display :1
+# with an XFCE session inside. Closing the window ends the session. Usage: xfce-desktop [WxH]
+# Install: sudo install -m 755 xfce-desktop /usr/local/bin/ (packages: docs/pc_setup.md)
+GEOM=${1:-1600x900}
+N=1
+ready() { timeout 1 xdpyinfo -display unix:$N >/dev/null 2>&1; }   # unix: no TCP fallback (it
+                                                                   # hangs in mirrored networking)
+if ! pgrep -f "^Xephyr :$N " >/dev/null; then
+    # /tmp/.X11-unix is WSLg's read-only mount: Xephyr listens on the abstract socket only
+    Xephyr :$N -screen "$GEOM" -resizeable -title "WSL desktop (XFCE)" -ac -br -noreset -nolisten tcp \
+        >/tmp/xephyr.log 2>&1 &
+    for i in $(seq 50); do ready && break; sleep 0.2; done
+fi
+export DISPLAY=:$N XDG_SESSION_TYPE=x11 GDK_BACKEND=x11   # GTK would take WSLg's wayland-0 otherwise
+export QT_QPA_PLATFORM=xcb                                # Qt (GNU Radio GUIs) likewise
+unset WAYLAND_DISPLAY
+exec dbus-launch --exit-with-session startxfce4 >/tmp/xfce.log 2>&1

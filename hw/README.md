@@ -30,6 +30,8 @@
 - 设备树叠加中外设总线的 compatible 用 `simple-pm-bus`：6.6 内核对叠加加入的纯 `simple-bus` 节点不创建子设备。
   ADI `adi-fmcomms2.dtsi` 中 40 MHz 参考时钟所在的 `/clocks` 节点也要是 `simple-pm-bus`，`build_dtbo.sh` 编译时把
   compatible 直接加进该节点：另写一个片段修改 `/clocks` 时，内核以"多个片段添加同一节点"拒绝整个叠加。
+  同时把这个 40 MHz 参考时钟改为 `adjustable-clock`（`clock-accuracy` ±200 ppm，与 ADALM-Pluto 相同）：AD9361 驱动的
+  `xo_correction` 由此可写，本振与采样率按同一比例校正；固定时钟会忽略写入。
 - 采样率上限 50 MSPS。61.44 MSPS 时 AD9361 数据接口时钟为 245.76 MHz（2R2T 与 1R1T 相同），第三方子卡上 TX 线对
   D4 / D5（D5 即 P/N 对调的一对）的眼图过窄：TX 只在 I 的高半字上出错，ADI 驱动在 61.44 MSPS 下做的 TX 调校在所有
   延时下都失败。设备树叠加因此跳过 TX 调校（`adi,digital-interface-tune-skip-mode = <2>`），用 dtsi 中的固定 TX 延时，

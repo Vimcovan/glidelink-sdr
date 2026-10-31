@@ -1,10 +1,10 @@
-# GlideLink SDR 设计文档（草案 v0.1）
+# GlideLink SDR 设计文档
 
 基于 PYNQ-ZU + AD9361 FMC 子卡的通信算法原型验证平台：板子接入 SoapySDR，先在 GNU Radio 中用软件验证算法，
 再把算法逐个模块卸载到 PL，最终脱离 PC 运行。PL 侧参考 RFNoC 的思路，用户可以加入自己的 FPGA 模块。
 
 本文给出总体架构、PL 外壳、用户模块接口规范、主机软件和开发流程，以及分阶段计划与待确认的问题。
-数值与接口在第 0 阶段的验证后再定稿。
+第 0～4 阶段已按本文实现，实施中定下的数值与调整见各阶段文档（`docs/phase*.md`）；使用方法见 [`user_guide.md`](user_guide.md)。
 
 ---
 
@@ -248,6 +248,9 @@ D5 极性补丁、AGC 看门狗的判据（同步率 + 增益），以及逐比�
 | 3：第一个模块 | NCO、FIR，走完第 6 节流程 | 仿真与上板硬件在环比对均逐比特一致；代理块替换后流程图输出不变 |
 | 4：迁移竞赛模块 | 同步、OFDM、DeepJSCC 作为用户模块 | 原竞赛系统在平台上以脱机方式运行，指标与竞赛版本相当 |
 | 5：文档与模板 | 模块模板、教程 | 按教程从零写一个新模块并在 GNU Radio 中调用 |
+
+状态（2026-10-31）：第 0～4 阶段完成；计划外另加了 MATLAB 接入（板上的桥接服务与 `glidelink.Radio`，见 [`matlab_plan.md`](matlab_plan.md)）；
+第 5 阶段的模块模板与教程尚未开始，使用指南与已知问题见 [`user_guide.md`](user_guide.md)、[`known_issues.md`](known_issues.md)。
 
 ---
 
