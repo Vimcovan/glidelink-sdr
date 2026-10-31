@@ -68,7 +68,19 @@ tx.txCyclic(x);                       % 在板上循环发送，不占网络
 电脑上的 GNU Radio 经 USB 网口连续传输，单块板约 5 MSPS 以内可靠；更高的采样率在板上运行流程图（`uri=local:` 或板子地址留空）。
 电脑端的安装与图形桌面见 [`pc_setup.md`](pc_setup.md)。
 
-### 3.3 SoapySDR 程序与 GQRX
+### 3.3 视频经离线图传链路
+
+电脑上的视频发给发射板，经空口由接收板解码传回，在电脑上并排对比（`sw/gr-glidelink/examples/jscc_video.grc`）：
+
+```bash
+systemctl start glidelinkd@tx        # 发射板；接收板为 glidelinkd@rx
+python3 glidelink_jscc_video.py -v <视频文件>
+```
+
+发射板按每秒 30 帧取电脑送来的最新一帧编码发出；电脑与板子之间是两路 256×256 画面（合计约 12 MB/s）。
+两块板相距约 1 m 时发射衰减宜在 8～16 dB（更小时接收端过载）。
+
+### 3.4 SoapySDR 程序与 GQRX
 
 设备参数 `driver=glidelink,uri=ip:192.168.3.1`（板上运行时 `driver=glidelink`）：
 
@@ -79,7 +91,7 @@ gqrx                                  # 设备串填 soapy=0,driver=glidelink,ur
 
 AD9361 驱动的全部参数、增益控制模式和寄存器经 Soapy 的设置项与寄存器接口访问，见 [`sw/soapy-glidelink/README.md`](../sw/soapy-glidelink/README.md)。
 
-### 3.4 MathWorks Pluto 支持包直连
+### 3.5 MathWorks Pluto 支持包直连
 
 Communications Toolbox Support Package for ADALM-Pluto 可以按地址连接板子（`sdrrx('Pluto', RadioID="ip:192.168.3.1")`），
 只提示固件版本未知。差别：采样率下限 0.52 MSPS（Pluto 的 FPGA 另有抽取，可到 65 kSPS）；支持包按 12 位换算样点，板子送出的是

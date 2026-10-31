@@ -1,6 +1,10 @@
 '[GlideLink]':
 - glidelink_source
 - glidelink_sink
+- glidelink_video_file_source
+- glidelink_jscc_tx_sink
+- glidelink_jscc_rx_source
+- glidelink_video_sink
 - glidelink_control
 - glidelink_host_source
 - glidelink_host_sink

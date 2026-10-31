@@ -1,0 +1,30 @@
+id: glidelink_jscc_tx_sink
+label: JSCC TX Sink
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: host
+    label: TX board
+    dtype: string
+    default: '192.168.4.1'
+-   id: att
+    label: TX attenuation (dB)
+    dtype: real
+    default: '4'
+
+inputs:
+-   domain: stream
+    dtype: byte
+    vlen: 196608
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.jscc_tx_sink(${host}, ${att})
+    callbacks:
+    - set_att(${att})
+
+documentation: |-
+    Frames (256x256 RGB, one per item) to the TX board of the offline DeepJSCC-Q system: the block switches the TX application (sw/offline/jscc_tx_app.py) to its source "net" and sends the frames to it (port 7023). The TX board encodes and sends the latest frame at its own 30 frames/s. The TX attenuation can be changed while running.
+
+file_format: 1

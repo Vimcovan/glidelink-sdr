@@ -1,0 +1,24 @@
+id: glidelink_jscc_rx_source
+label: JSCC RX Source
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: host
+    label: RX board
+    dtype: string
+    default: '192.168.3.1'
+
+outputs:
+-   domain: stream
+    dtype: byte
+    vlen: 196608
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.jscc_rx_source(${host})
+
+documentation: |-
+    The images decoded by the RX board of the offline DeepJSCC-Q system (sw/offline/jscc_rx_app.py, image stream port 7021), one 256x256 RGB frame per item, as they come.
+
+file_format: 1

@@ -9,6 +9,10 @@
 install(FILES
     glidelink_source.block.yml
     glidelink_sink.block.yml
+    glidelink_video_file_source.block.yml
+    glidelink_jscc_tx_sink.block.yml
+    glidelink_jscc_rx_source.block.yml
+    glidelink_video_sink.block.yml
     glidelink_control.block.yml
     glidelink_host_source.block.yml
     glidelink_host_sink.block.yml

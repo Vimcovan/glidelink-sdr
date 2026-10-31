@@ -1,0 +1,43 @@
+id: glidelink_video_sink
+label: Video Sink
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: nconnections
+    label: Inputs
+    dtype: int
+    default: '2'
+    options: ['1', '2']
+    option_labels: [One stream, Sent and decoded]
+-   id: zoom
+    label: Zoom
+    dtype: int
+    default: '2'
+-   id: gui_hint
+    label: GUI Hint
+    dtype: gui_hint
+    hide: part
+
+inputs:
+-   domain: stream
+    dtype: byte
+    vlen: 196608
+    multiplicity: ${ nconnections }
+
+templates:
+    imports: |-
+        from gnuradio import glidelink
+        from PyQt5 import Qt
+    make: |-
+        <%
+            win = 'self._%s_win'%id
+        %>\
+        glidelink.video_sink(${nconnections}, ${zoom})
+        ${win} = self.${id}.widget
+        ${gui_hint() % win}
+
+documentation: |-
+    Shows 256x256 RGB frames (one per item). With two inputs: the frames sent (input 0) next to the frames decoded (input 1). The decoded frames come later than the sent ones; each is shown next to the sent frame it matches best among the last 30, with its PSNR, the mean PSNR, both frame rates and the delay in frames. Each input is taken as it comes, so the sent stream keeps flowing while the link is down.
+
+file_format: 1

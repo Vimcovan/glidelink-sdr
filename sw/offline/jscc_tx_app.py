@@ -2,21 +2,24 @@
 """DeepJSCC-Q transmitter application (docs/phase4_plan.md 4.6): images -> host port 1 -> encoder.
 
 Runs on the TX board with glidelinkd (config/tx.yaml routes host1_tx -> jscc_enc -> ofdm_tx -> RF).
-The source is a still image (png / jpg / npy), a directory of them (cycled) or a video (cv2);
-every frame becomes 256x256 RGB (centre crop + resize, as the competition's TX) and is written to
-host port 1 (raw, 49,152 words) at --fps.
+The source is a still image (png / jpg / npy), a directory of them (cycled), a video (cv2) or
+"net": frames sent by a PC (port --net-port, 7023: "JTX1", frame id uint32, 256x256x3 RGB bytes;
+the latest one is sent, black before the first). Every frame becomes 256x256 RGB (centre crop +
+resize, as the competition's TX) and is written to host port 1 (raw, 49,152 words) at --fps.
 
     python3 jscc_tx_app.py --src media/presets/div2k_0802.png [--fps 30] [--port 7020]
+    python3 jscc_tx_app.py --src net          (gr-glidelink: Video File Source -> JSCC TX Sink)
 
 TCP control (one line per command, one line back), for the PC tools (sw/offline/link_metrics.py):
     time              -> "time <board time>"                      clock offset estimate
-    src <path>        -> "ok"                                     switch the source
+    src <path> | net  -> "ok"                                     switch the source
     att <dB>          -> "att <dB set>"                           TX attenuation (AD9361 TX1)
     state             -> JSON: source, attenuation, frames sent, frame rate
     ref               -> "ref <index> <bytes>" + the last frame sent (256x256x3 uint8), for display
                          and PSNR on the PC (gr-glidelink jscc_rx_view)
     events            -> then one line per frame sent: "frame <n> <t_start> <t_end> <src id> <index>"
-                         (index: image number in a directory source, in sorted file order)
+                         (index: image number in a directory source, in sorted file order; the
+                         PC's frame id for the net source)
 """
 import argparse
 import json
@@ -77,9 +80,56 @@ class Source:
         return self.frames[i], i
 
 
+class NetSource:
+    """frames from a PC over TCP: the latest one is sent (the TX keeps its own pace)"""
+    MAGIC = b"JTX1"
+
+    def __init__(self, port):
+        self.spec, self.id = "net", 9999
+        self.latest, self.lock = (np.zeros((IMG, IMG, 3), np.uint8), -1), threading.Lock()
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("", port))
+        srv.listen(2)
+        threading.Thread(target=self.serve, args=(srv,), daemon=True).start()
+
+    def serve(self, srv):
+        while True:
+            c, _ = srv.accept()
+            threading.Thread(target=self.receive, args=(c,), daemon=True).start()
+
+    def receive(self, c):
+        need = 8 + IMG * IMG * 3
+        buf = bytearray()
+        try:
+            while True:
+                while len(buf) < need:
+                    chunk = c.recv(1 << 20)
+                    if not chunk:
+                        return
+                    buf += chunk
+                if buf[:4] != self.MAGIC:
+                    return                              # out of step: the PC reconnects
+                fid = int.from_bytes(buf[4:8], "little")
+                img = np.frombuffer(bytes(buf[8:need]), np.uint8).reshape(IMG, IMG, 3)
+                with self.lock:
+                    self.latest = (img, fid)
+                del buf[:need]
+        except OSError:
+            pass
+        finally:
+            c.close()
+
+    def next(self):
+        with self.lock:
+            return self.latest
+
+
 class App:
     def __init__(self, a):
-        self.a, self.src, self.lock = a, Source(a.src), threading.Lock()
+        self.a, self.lock = a, threading.Lock()
+        self.net = None
+        self.src = self.source(a.src)
         self.listeners = []
         self.frames, self.last = 0, (0, bytes(IMG * IMG * 3))
         self.dev = SoapySDR.Device(a.args)
@@ -95,7 +145,7 @@ class App:
                 f.write(f"time {time.time():.6f}\n")
             elif cmd == "src":
                 try:
-                    s = Source(arg)
+                    s = self.source(arg)
                     with self.lock:
                         self.src = s
                     f.write("ok\n")
@@ -126,6 +176,13 @@ class App:
                 return                                  # the frame loop writes from now on
             else:
                 f.write("error unknown command\n")
+
+    def source(self, spec):
+        if spec == "net":                               # one listener for the life of the app
+            if self.net is None:
+                self.net = NetSource(self.a.net_port)
+            return self.net
+        return Source(spec)
 
     def serve(self):
         srv = socket.socket()
@@ -176,6 +233,7 @@ def main():
     ap.add_argument("--src", required=True)
     ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--port", type=int, default=7020)
+    ap.add_argument("--net-port", type=int, default=7023, help="frames from a PC (source 'net')")
     ap.add_argument("--args", default="driver=glidelink")
     App(ap.parse_args()).run()
 

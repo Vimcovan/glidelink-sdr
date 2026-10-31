@@ -1,0 +1,32 @@
+id: glidelink_video_file_source
+label: Video File Source
+category: '[GlideLink]'
+flags: [python, throttle]
+
+parameters:
+-   id: path
+    label: File
+    dtype: file_open
+    default: ''
+-   id: fps
+    label: Frame rate (0 = the file's)
+    dtype: real
+    default: '0'
+-   id: repeat
+    label: Loop
+    dtype: bool
+    default: 'True'
+
+outputs:
+-   domain: stream
+    dtype: byte
+    vlen: 196608
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.video_file_source(${path}, ${fps}, ${repeat})
+
+documentation: |-
+    Frames from a video file (anything OpenCV opens: mp4, avi, mkv, ...), an image, a directory of images or a camera (its index: 0, 1, ...), centre-cropped to a square and resized to 256x256 RGB. One item = one frame (196,608 bytes), at the file's frame rate unless given.
+
+file_format: 1

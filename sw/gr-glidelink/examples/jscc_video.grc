@@ -1,0 +1,131 @@
+options:
+  parameters:
+    author: GlideLink
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    description: Video from the PC through the offline DeepJSCC-Q link (TX board -> air -> RX board) and back, sent and decoded side by side
+    generate_options: qt_gui
+    id: glidelink_jscc_video
+    output_language: python
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    title: GlideLink video link
+    window_size: (1200,1000)
+  states:
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: video
+  id: parameter
+  parameters:
+    comment: video file on the PC (mp4, avi, mkv, ...), an image, a directory of images or a camera index
+    label: Video
+    short_id: v
+    type: str
+    value: ''
+  states:
+    coordinate: [220, 8]
+    rotation: 0
+    state: enabled
+- name: tx_att
+  id: variable_qtgui_range
+  parameters:
+    comment: 'boards about 1 m apart: 8 .. 16 dB is best (below, the receiver is overdriven)'
+    gui_hint: 1,0,1,1
+    label: TX attenuation (dB)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0'
+    step: '1'
+    stop: '60'
+    value: '10'
+    widget: counter_slider
+  states:
+    coordinate: [400, 8]
+    rotation: 0
+    state: enabled
+- name: src
+  id: glidelink_video_file_source
+  parameters:
+    comment: ''
+    fps: '0'
+    repeat: 'True'
+    path: video
+  states:
+    coordinate: [8, 160]
+    rotation: 0
+    state: enabled
+- name: tx
+  id: glidelink_jscc_tx_sink
+  parameters:
+    att: tx_att
+    comment: TX board
+    host: '192.168.4.1'
+  states:
+    coordinate: [300, 130]
+    rotation: 0
+    state: enabled
+- name: rx
+  id: glidelink_jscc_rx_source
+  parameters:
+    comment: RX board
+    host: '192.168.3.1'
+  states:
+    coordinate: [8, 280]
+    rotation: 0
+    state: enabled
+- name: view
+  id: glidelink_video_sink
+  parameters:
+    comment: ''
+    gui_hint: 0,0,1,2
+    nconnections: '2'
+    zoom: '2'
+  states:
+    coordinate: [300, 230]
+    rotation: 0
+    state: enabled
+- name: symbols
+  id: glidelink_jscc_rx_symbols
+  parameters:
+    comment: ''
+    interval: '2.0'
+    rx_host: '192.168.3.1'
+  states:
+    coordinate: [8, 400]
+    rotation: 0
+    state: enabled
+- name: const
+  id: qtgui_const_sink_x
+  parameters:
+    autoscale: 'False'
+    comment: ''
+    grid: 'True'
+    gui_hint: 1,1,2,1
+    name: '"Receiver constellation (64-QAM)"'
+    nconnections: '1'
+    size: '8192'
+    type: complex
+    update_time: '0.5'
+    xmax: '1.5'
+    xmin: '-1.5'
+    ymax: '1.5'
+    ymin: '-1.5'
+  states:
+    coordinate: [300, 400]
+    rotation: 0
+    state: enabled
+
+connections:
+- [src, '0', tx, '0']
+- [src, '0', view, '0']
+- [rx, '0', view, '1']
+- [symbols, '0', const, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2

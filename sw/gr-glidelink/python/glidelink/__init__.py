@@ -22,6 +22,7 @@ except ModuleNotFoundError:
 # import any pure python here
 from .control import control
 from .rf import source, sink
+from .video import video_file_source, jscc_tx_sink, jscc_rx_source, video_sink
 from .host_port import host_source, host_sink
 from .modules import nco_model, nco, fir_model, fir
 from .jscc import jscc_tx_control, jscc_rx_view, jscc_rx_symbols
