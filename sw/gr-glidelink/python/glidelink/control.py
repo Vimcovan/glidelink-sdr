@@ -32,7 +32,7 @@ _slot_port = lambda k: 2 if k == 0 else 3 + k
 SINKS = {"rf_tx": 0, "host0_rx": 1, "host1_rx": 3, **{f"slot{k}_in": _slot_port(k) for k in range(11)}}
 SOURCES = {"rf_rx": 0, "host0_tx": 1, "host1_tx": 3, **{f"slot{k}_out": _slot_port(k) for k in range(11)},
            "none": 15}
-REG_ROUTE, REG_PORT_RESET = 0x1000, 0x05C
+REG_ROUTE, REG_PORT_RESET, REG_CAPS = 0x1000, 0x05C, 0x008
 # PORT_RESET bit that flushes each sink: RF TX (with the TX streamer), host 0 RX,
 # host 1 RX, slot k (its stream state; registers are kept)
 SINK_FLUSH = {0: 1 << 1, 1: 1 << 0, 3: 1 << 3, **{_slot_port(k): 1 << (2 if k == 0 else 4 + k) for k in range(11)}}
@@ -43,6 +43,27 @@ def _str(v):
     if isinstance(v, bool):
         return "true" if v else "false"
     return str(v)
+
+
+def route(dev, sink, source):
+    """Route sink <- source (names as in SINKS / SOURCES, or switch port numbers) on a SoapySDR
+    device. When the route changes, the sink is flushed too (PORT_RESET): a sink takes a new
+    route only between packets, and one stalled inside a packet (e.g. a host port nobody reads)
+    would otherwise never get there. A source feeds one sink at a time: any other sink routed
+    from the same source is set to none (and flushed)."""
+    s = SOURCES[source] if isinstance(source, str) else int(source)
+    j = SINKS[sink]
+    if s != SOURCES["none"]:
+        nslots = dev.readRegister("FPGA", REG_CAPS) >> 24
+        present = {SINKS["rf_tx"], SINKS["host0_rx"], SINKS["host1_rx"]} | {_slot_port(k) for k in range(nslots)}
+        for k in present - {j}:
+            if dev.readRegister("FPGA", REG_ROUTE + 4 * k) == s:
+                dev.writeRegister("FPGA", REG_ROUTE + 4 * k, SOURCES["none"])
+                dev.writeRegister("FPGA", REG_PORT_RESET, SINK_FLUSH[k])
+    if dev.readRegister("FPGA", REG_ROUTE + 4 * j) == s:
+        return
+    dev.writeRegister("FPGA", REG_ROUTE + 4 * j, s)
+    dev.writeRegister("FPGA", REG_PORT_RESET, SINK_FLUSH[j])
 
 
 def _register(item):
@@ -78,16 +99,9 @@ class control(gr.basic_block):
     # routes
 
     def set_route(self, sink, source):
-        """Route sink <- source. When the route changes, the sink is flushed too (PORT_RESET):
-        a sink takes a new route only between packets, and one stalled inside a packet (e.g.
-        a host port nobody reads) would otherwise never get there."""
-        s = SOURCES[source] if isinstance(source, str) else int(source)
-        j = SINKS[sink]
+        """Route sink <- source (see route())."""
         with self.lock:
-            if self.dev.readRegister("FPGA", REG_ROUTE + 4 * j) == s:
-                return
-            self.dev.writeRegister("FPGA", REG_ROUTE + 4 * j, s)
-            self.dev.writeRegister("FPGA", REG_PORT_RESET, SINK_FLUSH[j])
+            route(self.dev, sink, source)
 
     def get_route(self, sink):
         with self.lock:

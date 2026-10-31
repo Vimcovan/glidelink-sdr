@@ -25,6 +25,18 @@ parameters:
     dtype: real
     default: '0'
 
+inputs:
+-   domain: glidelink_pl
+    dtype: sc16
+    label: pl_in
+    optional: true
+
+outputs:
+-   domain: glidelink_pl
+    dtype: sc16
+    label: pl_out
+    optional: true
+
 templates:
     imports: from gnuradio import glidelink
     make: glidelink.nco(${args}, ${slot}, ${samp_rate}, ${freq}, ${phase})
@@ -32,6 +44,6 @@ templates:
     - set_freq(${freq})
 
 documentation: |-
-    Proxy for the NCO mixer in a PL slot: writes its registers (FREQ, PHASE, CONTROL) and passes no data. Route the data through the slot with GlideLink Control, e.g. {'slot1_in': 'host1_tx', 'host1_rx': 'slot1_out'} with the host port source / sink, or {'slot1_in': 'rf_rx', 'host0_rx': 'slot1_out'} in front of the Soapy source.
+    Proxy for the NCO mixer in a PL slot: writes its registers (FREQ, PHASE, CONTROL) and passes no data. Connect its PL ports (orange) to other PL ports, e.g. GlideLink Radio (PL) rf_rx -> NCO -> GlideLink Host Source; GRC sets the routes. The routes can also be set with GlideLink Control, e.g. {'slot1_in': 'host1_tx', 'host1_rx': 'slot1_out'} with the host port source / sink, or {'slot1_in': 'rf_rx', 'host0_rx': 'slot1_out'} in front of the Soapy source.
 
 file_format: 1

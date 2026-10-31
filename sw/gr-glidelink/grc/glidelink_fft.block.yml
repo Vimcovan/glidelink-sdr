@@ -1,0 +1,91 @@
+id: glidelink_fft
+label: GlideLink FFT (PL)
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: args
+    label: Device arguments
+    dtype: string
+    default: 'driver=glidelink'
+-   id: slot
+    label: Slot
+    dtype: int
+    default: '1'
+-   id: size
+    label: FFT size
+    dtype: int
+    default: '1024'
+-   id: direction
+    label: Direction
+    dtype: enum
+    options: ['"forward"', '"inverse"']
+    option_labels: [Forward (FFT), Inverse (IFFT)]
+    default: '"forward"'
+-   id: order
+    label: Output order
+    dtype: enum
+    options: ['"normal"', '"reverse"', '"natural"', '"bit_reverse"']
+    option_labels: [Normal (0 Hz centre), Reverse, Natural (0 Hz first), Bit reversed]
+    default: '"normal"'
+-   id: output
+    label: Output
+    dtype: enum
+    options: ['"complex"', '"magnitude"', '"magnitude_squared"']
+    option_labels: [Complex, Magnitude, Magnitude squared]
+    default: '"complex"'
+-   id: scaling
+    label: Scaling schedule (-1 = 1/N)
+    dtype: int
+    default: '-1'
+-   id: keep
+    label: Keep one in
+    dtype: int
+    default: '1'
+-   id: cp_rem
+    label: CP removal list
+    dtype: int_vector
+    default: '[]'
+-   id: cp_ins
+    label: CP insertion list
+    dtype: int_vector
+    default: '[]'
+-   id: bypass
+    label: Bypass FFT
+    dtype: bool
+    default: 'False'
+
+inputs:
+-   domain: glidelink_pl
+    dtype: sc16
+    label: pl_in
+    optional: true
+
+outputs:
+-   domain: glidelink_pl
+    dtype: sc16
+    label: pl_out
+    optional: true
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.fft(${args}, ${slot}, ${size}, ${direction}, ${order}, ${output}, ${scaling}, ${keep}, ${cp_rem}, ${cp_ins}, ${bypass})
+    callbacks:
+    - set_size(${size})
+    - set_direction(${direction})
+    - set_order(${order})
+    - set_output(${output})
+    - set_scaling(${scaling})
+    - set_keep(${keep})
+    - set_cp_rem(${cp_rem})
+    - set_cp_ins(${cp_ins})
+    - set_bypass(${bypass})
+
+documentation: |-
+    The FFT in a PL slot (hw/modules/fft): the core of the Ettus RFNoC FFT block (UHD, LGPL-3.0-or-later) behind the GlideLink slot interface. The block writes the registers; the data goes through the PL ports.
+
+    FFT size 8 to 4096; each output packet is one FFT (plus the cyclic prefix when inserting). Order Normal puts 0 Hz in the centre. Magnitude (approximate, max + min/4) and magnitude squared / 32768 come in I, with Q = 0. Scaling -1 gives 1/N; any other value is the Xilinx FFT schedule, 2 bits per radix-4 stage. Keep one in K passes every K-th FFT: the spectrum of the full-rate signal at 1/K of the data rate to the host. CP lists: cyclic prefix lengths removed before / inserted after successive FFTs, repeated.
+
+    GlideLink FFT (software) computes the same in floating point.
+
+file_format: 1

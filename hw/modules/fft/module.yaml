@@ -1,0 +1,74 @@
+# GlideLink user module description (docs/design.md 5.3)
+id: fft
+name: FFT / IFFT (RFNoC FFT block core)
+rtl: glidelink_fft.sv
+top: glidelink_fft
+model: model.py
+source: >-
+  Ettus Research UHD @ d1be634 (2026-10-13), fpga/usrp3/lib/rfnoc/blocks/rfnoc_block_fft,
+  module fft_core and the library files it uses, LGPL-3.0-or-later, unchanged in
+  hw/modules/uhd_rfnoc; the wrapper glidelink_fft.sv takes the place of RFNoC's noc_shell
+id_value: 0x46465431          # "FFT1", register ID
+version: 1.0.0
+uses: [uhd_rfnoc]
+ip: [ip/xfft_4k_16b.xci]      # Xilinx FFT 9.1, UHD's settings, retargeted to xczu5eg
+parameters:
+  MAX_FFT_SIZE_LOG2: 12       # 4096; another maximum needs the matching xfft_<n>_16b IP
+data:
+  input: sc16
+  output: "sc16 (FFT bins), or magnitude / magnitude squared in I with Q = 0"
+  tuser: >-
+    output: on the first beat of each packet (one FFT), the timestamp of the burst's first
+    input sample counted on as if contiguous, flag bit 1 = end of burst
+function: >-
+  As the RFNoC FFT block: FFT or IFFT of 2^LENGTH_LOG2 samples (8 .. 4096), Xilinx FFT core
+  with scaling schedule SCALING (default 1/N for 4096), optional cyclic prefix removal before
+  and insertion after it, output order (normal = 0 Hz in the centre, reverse, natural,
+  bit-reversed), complex output, magnitude or magnitude squared / 32768. Output packets of
+  2^LENGTH_LOG2 samples plus the first cyclic prefix insertion entry; KEEP passes one in
+  every KEEP of them. CONTROL.enable = 0 passes the samples unchanged.
+registers:
+  - {name: ID, offset: 0x000, access: ro}
+  - {name: VERSION, offset: 0x004, access: ro}
+  - name: CONTROL
+    offset: 0x008
+    access: rw
+    default: 0
+    fields:
+      - {name: enable, bits: 0, doc: "1 = FFT, 0 = pass unchanged; a change waits for packet boundaries and resets the core"}
+      - {name: soft_reset, bits: 1, doc: "self-clearing: core reset now, registers written back"}
+  - name: STATUS
+    offset: 0x00C
+    access: ro
+    fields:
+      - {name: enabled, bits: 0}
+      - {name: busy, bits: 1, doc: "switching or resetting; core registers not accessible"}
+  - {name: KEEP, offset: 0x010, access: rw, default: 1, doc: "output one FFT packet in every KEEP (0 = 1); as RFNoC's Keep One in N in packet mode, not part of the RFNoC FFT block"}
+  # the RFNoC FFT block registers (fft_core_regs_pkg.sv), RFNoC offset + 0x100
+  - {name: COMPAT, offset: 0x100, access: ro}
+  - {name: PORT_CONFIG, offset: 0x104, access: ro}
+  - {name: CAPABILITIES, offset: 0x108, access: ro, doc: "{CP list ins log2, CP list rem log2, max CP log2, max FFT log2} (8 bits each)"}
+  - {name: CAPABILITIES2, offset: 0x10C, access: ro}
+  - {name: RESET, offset: 0x110, access: wo, doc: "any write: the core's own reset (registers to defaults); prefer CONTROL.soft_reset"}
+  - {name: LENGTH_LOG2, offset: 0x114, access: rw, default: 12, doc: "log2 FFT size, 3 .. 12; a change waits for packet boundaries and resets the core"}
+  - {name: SCALING, offset: 0x118, access: rw, default: 2730, doc: "Xilinx FFT scaling schedule, 2 bits per radix-4 stage (PG109); 1/N for 4096 = 0b101010101010"}
+  - {name: DIRECTION, offset: 0x11C, access: rw, default: 1, doc: "1 = forward, 0 = inverse"}
+  - {name: CP_INS_LEN, offset: 0x120, access: rw, default: 0, doc: "cyclic prefix length that CP_INS_LIST_LOAD appends to the insertion list (the list repeats; empty = none)"}
+  - {name: CP_INS_LIST_LOAD, offset: 0x124, access: wo, doc: "any write: append CP_INS_LEN (up to 32 entries; kept over resets by the wrapper)"}
+  - {name: CP_INS_LIST_CLR, offset: 0x128, access: wo}
+  - {name: CP_INS_LIST_OCC, offset: 0x12C, access: ro}
+  - {name: CP_REM_LEN, offset: 0x130, access: rw, default: 0, doc: "cyclic prefix length that CP_REM_LIST_LOAD appends to the removal list (the list repeats; empty = none)"}
+  - {name: CP_REM_LIST_LOAD, offset: 0x134, access: wo, doc: "any write: append CP_REM_LEN (up to 32 entries; kept over resets by the wrapper)"}
+  - {name: CP_REM_LIST_CLR, offset: 0x138, access: wo}
+  - {name: CP_REM_LIST_OCC, offset: 0x13C, access: ro}
+  - {name: OVERFLOW, offset: 0x140, access: ro, doc: "sticky FFT overflow, cleared on read"}
+  - {name: BYPASS, offset: 0x144, access: rw, default: 0, doc: "1 = skip the FFT (CP removal / insertion, order and magnitude still apply)"}
+  - {name: ORDER, offset: 0x148, access: rw, default: 0, doc: "0 normal (0 Hz centre), 1 reverse, 2 natural, 3 bit-reversed"}
+  - {name: MAGNITUDE, offset: 0x14C, access: rw, default: 0, doc: "0 complex, 1 magnitude (approximate), 2 magnitude squared / 32768"}
+resources:                    # in the shell, xczu5eg, Vivado 2025.2 (dsp image); the Xilinx FFT IP is
+  lut: 6011                   # 3084 LUT, 5548 FF, 50 DSP, 1 + 11 BRAM of it
+  ff: 8764
+  dsp: 52
+  bram36: 1
+  bram18: 11
+  uram: 3

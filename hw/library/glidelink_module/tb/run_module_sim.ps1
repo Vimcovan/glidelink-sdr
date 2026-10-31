@@ -14,6 +14,7 @@ param(
   [int]$Packets = 0,                        # capture mode: stop after this many output packets
   [double]$TimeoutMs = 0,                   # simulated time limit (default 13 ms)
   [switch]$NoTuser,                         # output packets not one to one with input packets
+  [int]$InFlags = -1,                       # input packets' tuser flags (default 0xC3 ^ packet number)
   [string]$Bin = "D:\AMDDesignTools\2025.2\Vivado\bin"
 )
 $ErrorActionPreference = "Stop"
@@ -30,6 +31,7 @@ try {
   if ($Capture) { $cfg += "``define CAPTURE`n" }
   if ($Packets -gt 0) { $cfg += "``define CAPTURE_PACKETS $Packets`n" }
   if ($NoTuser) { $cfg += "``define NO_TUSER_CHECK`n" }
+  if ($InFlags -ge 0) { $cfg += "``define IN_FLAGS 8'd$InFlags`n" }
   if ($TimeoutMs -gt 0) { $cfg += "``define TIMEOUT_NS ($($TimeoutMs * 1e6))`n" }
   $cfg | Set-Content -Encoding ascii tb_cfg.vh
 
@@ -39,15 +41,19 @@ import json, sys
 sys.path.insert(0, r'$here\..\..\..\scripts')
 import gen_image
 i = gen_image.module_info('$name')
-print(json.dumps({'rtl': i['rtl'], 'ip': gen_image.patch_ips(i, r'$work\ip_xci')}))
+print(json.dumps({'rtl': i['rtl'], 'sv': gen_image.sv_compile_order(i['rtl']), 'ip': gen_image.patch_ips(i, r'$work\ip_xci')}))
 "@
   $info = (& python -c $py) | ConvertFrom-Json
   $v = @(Get-ChildItem (Join-Path $here "..\*.v") | ForEach-Object { $_.FullName })
   $v += @($info.rtl | Where-Object { $_ -like "*.v" })
-  $sv = @($info.rtl | Where-Object { $_ -like "*.sv" })
+  # SystemVerilog packages first, in dependency order: xvlog compiles in the order given
+  $sv = @($info.sv)
+  # include path: the work directory (tb_cfg.vh) and every directory holding a library header
+  $inc = @("-i", $work)
+  foreach ($d in @($info.rtl | Where-Object { $_ -like "*.vh" -or $_ -like "*.svh" } | ForEach-Object { Split-Path $_ } | Sort-Object -Unique)) { $inc += @("-i", $d) }
   foreach ($m in @($info.rtl | Where-Object { $_ -like "*.mem" })) { Copy-Item -Force $m . }
 
-  $libs = @("-L", "xpm")
+  $libs = @("-L", "xpm", "-L", "unisims_ver")    # unisims: primitives in library RTL (e.g. SRLC32E)
   if ($info.ip.Count -gt 0) {
     $ipdir = Join-Path $work "ip_sim"
     if (-not (Test-Path (Join-Path $ipdir "export"))) {
@@ -65,10 +71,10 @@ print(json.dumps({'rtl': i['rtl'], 'ip': gen_image.patch_ips(i, r'$work\ip_xci')
     }
   }
 
-  & "$Bin\xvlog.bat" --nolog -i $work $v (Join-Path $here "tb_module.v") | Out-Null
+  & "$Bin\xvlog.bat" --nolog $inc $v (Join-Path $here "tb_module.v") | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "xvlog failed" }
   if ($sv.Count -gt 0) {
-    & "$Bin\xvlog.bat" --nolog -sv $sv | Out-Null
+    & "$Bin\xvlog.bat" --nolog -sv $inc $sv | Select-String "ERROR"
     if ($LASTEXITCODE -ne 0) { throw "xvlog -sv failed" }
   }
   & "$Bin\xvlog.bat" --nolog (Join-Path (Split-Path $Bin) "data\verilog\src\glbl.v") | Out-Null

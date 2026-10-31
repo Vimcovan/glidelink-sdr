@@ -8,7 +8,8 @@
 // The input is sent with random gaps, the output taken with random back-pressure.
 // Each input packet carries tuser = {8'hC3 ^ p[7:0], 64'(p)} on its first beat
 // (p = packet number); the output must keep it on the first beat of the same packet,
-// unless NO_TUSER_CHECK is defined (modules whose output packets do not map one to
+// (IN_FLAGS, if defined, replaces the flags 8'hC3 ^ p, e.g. 0 for modules that act on
+// flag bit 1 = end of burst), unless NO_TUSER_CHECK is defined (modules whose output packets do not map one to
 // one onto input packets, e.g. jscc_enc: an image in, a symbol frame out).
 // Capture mode (CAPTURE defined, for modules checked by a script instead of a
 // vector file, e.g. ofdm_tx): every output beat goes to <dir>/captured.hex as
@@ -123,7 +124,11 @@ module tb_module;
           s_valid <= 1'b1;
           s_data <= in_w[sent];
           s_last <= in_l[sent];
+`ifdef IN_FLAGS
+          s_user <= (sent == 0 || in_l[sent - 1]) ? {`IN_FLAGS, 32'd0, pkt_in} : 72'd0;
+`else
           s_user <= (sent == 0 || in_l[sent - 1]) ? {8'hC3 ^ pkt_in[7:0], 32'd0, pkt_in} : 72'd0;
+`endif
         end else begin
           s_valid <= 1'b0;
         end

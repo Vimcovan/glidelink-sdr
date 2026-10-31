@@ -1,0 +1,71 @@
+id: glidelink_radio
+label: GlideLink Radio (PL)
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: address
+    label: Board
+    dtype: string
+    default: '192.168.3.1'
+-   id: samp_rate
+    label: Sample rate
+    dtype: real
+    default: samp_rate
+-   id: rx_freq
+    label: RX frequency
+    dtype: real
+    default: 915e6
+-   id: tx_freq
+    label: TX frequency (0 = RX + 10 MHz)
+    dtype: real
+    default: '0'
+-   id: bandwidth
+    label: RF bandwidth (0 = sample rate)
+    dtype: real
+    default: '0'
+-   id: gain_mode
+    label: Gain mode
+    dtype: enum
+    options: ['"manual"', '"slow_attack"', '"fast_attack"', '"hybrid"']
+    option_labels: [Manual, Slow attack AGC, Fast attack AGC, Hybrid AGC]
+    default: '"manual"'
+-   id: gain
+    label: RX gain (dB)
+    dtype: real
+    default: '40'
+-   id: atten
+    label: TX attenuation (dB)
+    dtype: real
+    default: '30'
+
+inputs:
+-   domain: glidelink_pl
+    dtype: sc16
+    label: rf_tx
+    optional: true
+
+outputs:
+-   domain: glidelink_pl
+    dtype: sc16
+    label: rf_rx
+    optional: true
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.radio(${address}, ${samp_rate}, ${rx_freq}, ${tx_freq}, ${bandwidth}, ${gain_mode}, ${gain}, ${atten})
+    callbacks:
+    - set_samp_rate(${samp_rate})
+    - set_rx_freq(${rx_freq})
+    - set_tx_freq(${tx_freq})
+    - set_bandwidth(${bandwidth})
+    - set_gain_mode(${gain_mode})
+    - set_gain(${gain})
+    - set_atten(${atten})
+
+documentation: |-
+    The RF of a GlideLink board as the PL sees it, as the RFNoC radio block: output rf_rx (the AD9361 RX samples), input rf_tx (to the AD9361 TX). Connect them to other PL ports (orange); the samples stay in the PL, no data passes through GNU Radio.
+
+    Sample rate 0.52 to 50 MSPS: the PL handles the full rate, a host port over the USB network link up to 20 MSPS without loss. TX frequency 0 puts the TX LO 10 MHz above the RX LO, out of the RX band. Settings can be changed while running.
+
+file_format: 1

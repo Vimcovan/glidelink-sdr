@@ -29,12 +29,18 @@ inputs:
 -   domain: stream
     dtype: ${ type.dtype }
 
+outputs:
+-   domain: glidelink_pl
+    dtype: sc16
+    label: pl_out
+    optional: true
+
 templates:
     imports: from gnuradio import glidelink
     make: glidelink.host_sink(${args}, '${type}', ${headers}, ${buffer_length})
 
 documentation: |-
-    Host port 1 of the GlideLink PL shell: the data of the modules in the slots, routed with GlideLink Control (sink host1_rx, source host1_tx).
+    Host port 1 of the GlideLink PL shell: data for the modules in the slots. The PL output (orange) connects to the PL input of a module or of GlideLink Radio (PL) (source host1_tx); the route can also be set with GlideLink Control.
 
     Complex: each 32-bit word {Q, I} as a complex number, full scale 32768. Int: the words as they are.
 

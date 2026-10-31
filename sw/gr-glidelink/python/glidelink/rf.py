@@ -26,7 +26,7 @@ class source(gr.hier_block2):
     """GlideLink Source: received samples of a board's AD9361.
 
     address    board ('192.168.3.1', 'ip:...', '' for the board this runs on, or a Soapy string)
-    samp_rate  0.52 .. 61.44 MSPS (over the USB network link keep it near 5 MSPS or below)
+    samp_rate  0.52 .. 50 MSPS (over the USB network link to a PC: up to 20 MSPS without loss)
     freq       RX LO, 70 MHz .. 6 GHz
     bandwidth  RF filter bandwidth; 0: the sample rate
     gain_mode  'manual', 'slow_attack', 'fast_attack', 'hybrid' (the AD9361 gain control modes)
@@ -37,6 +37,7 @@ class source(gr.hier_block2):
                  gain_mode="manual", gain=40.0):
         gr.hier_block2.__init__(self, "GlideLink Source", gr.io_signature(0, 0, 0),
                                 gr.io_signature(1, 1, gr.sizeof_gr_complex))
+        self.pl_args, self.pl_inputs, self.pl_outputs = device_args(address), {"0": "host0_rx"}, {}
         self.src = soapy.source(device_args(address), "fc32", 1, "", "", [""], [""])
         self.connect(self.src, self)
         self._samp_rate, self._bandwidth = samp_rate, bandwidth
@@ -75,7 +76,7 @@ class sink(gr.hier_block2):
     """GlideLink Sink: samples to transmit on a board's AD9361 (complex, |x| <= 1).
 
     address    board, as for the source
-    samp_rate  0.52 .. 61.44 MSPS
+    samp_rate  0.52 .. 50 MSPS (over the USB network link: up to 20 MSPS without loss)
     freq       TX LO, 47 MHz .. 6 GHz
     bandwidth  RF filter bandwidth; 0: the sample rate
     atten      TX attenuation, 0 .. 89.75 dB
@@ -84,6 +85,7 @@ class sink(gr.hier_block2):
     def __init__(self, address="192.168.4.1", samp_rate=2.5e6, freq=915e6, bandwidth=0.0, atten=20.0):
         gr.hier_block2.__init__(self, "GlideLink Sink", gr.io_signature(1, 1, gr.sizeof_gr_complex),
                                 gr.io_signature(0, 0, 0))
+        self.pl_args, self.pl_inputs, self.pl_outputs = device_args(address), {}, {"0": "host0_tx"}
         self.snk = soapy.sink(device_args(address), "fc32", 1, "", "", [""], [""])
         self.connect(self, self.snk)
         self._samp_rate, self._bandwidth = samp_rate, bandwidth

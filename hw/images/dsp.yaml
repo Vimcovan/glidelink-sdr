@@ -1,0 +1,8 @@
+# DSP image: the RFNoC FFT block core (hw/modules/fft) with the example FIR and NCO, for
+# building signal chains in the PL from GNU Radio (GlideLink PL blocks, connected in GRC).
+name: dsp
+slots:
+  - {module: passthrough}         # slot 0
+  - {module: fft}                 # slot 1
+  - {module: fir, params: {TAPS: 32}}
+  - {module: nco}                 # slot 3

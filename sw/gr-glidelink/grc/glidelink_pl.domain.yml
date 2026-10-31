@@ -1,0 +1,10 @@
+id: glidelink_pl
+label: GlideLink PL
+color: "#d9772b"
+
+multiple_connections_per_input: false
+multiple_connections_per_output: false
+
+templates:
+-   type: [glidelink_pl, glidelink_pl]
+    connect: glidelink.pl_connect(self.${ source.parent_block.name }, '${ source.key }', self.${ sink.parent_block.name }, '${ sink.key }')

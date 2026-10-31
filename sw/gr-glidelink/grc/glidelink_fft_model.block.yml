@@ -1,0 +1,68 @@
+id: glidelink_fft_model
+label: GlideLink FFT (software)
+category: '[GlideLink]'
+flags: [python]
+
+parameters:
+-   id: size
+    label: FFT size
+    dtype: int
+    default: '1024'
+-   id: direction
+    label: Direction
+    dtype: enum
+    options: ['"forward"', '"inverse"']
+    option_labels: [Forward (FFT), Inverse (IFFT)]
+    default: '"forward"'
+-   id: order
+    label: Output order
+    dtype: enum
+    options: ['"normal"', '"reverse"', '"natural"', '"bit_reverse"']
+    option_labels: [Normal (0 Hz centre), Reverse, Natural (0 Hz first), Bit reversed]
+    default: '"normal"'
+-   id: output
+    label: Output
+    dtype: enum
+    options: ['"complex"', '"magnitude"', '"magnitude_squared"']
+    option_labels: [Complex, Magnitude, Magnitude squared]
+    default: '"complex"'
+-   id: scaling
+    label: Scaling schedule (-1 = 1/N)
+    dtype: int
+    default: '-1'
+-   id: keep
+    label: Keep one in
+    dtype: int
+    default: '1'
+-   id: cp_rem
+    label: CP removal
+    dtype: int
+    default: '0'
+-   id: cp_ins
+    label: CP insertion
+    dtype: int
+    default: '0'
+
+inputs:
+-   domain: stream
+    dtype: complex
+
+outputs:
+-   domain: stream
+    dtype: complex
+
+templates:
+    imports: from gnuradio import glidelink
+    make: glidelink.fft_model(${size}, ${direction}, ${order}, ${output}, ${scaling}, ${keep}, ${cp_rem}, ${cp_ins})
+    callbacks:
+    - set_size(${size})
+    - set_direction(${direction})
+    - set_order(${order})
+    - set_output(${output})
+    - set_scaling(${scaling})
+    - set_keep(${keep})
+
+documentation: |-
+    The computation of the PL FFT module in software (hw/modules/fft/model.py, floating point; the PL output agrees to about 1 LSB), complex samples with full scale 1, one cyclic prefix length each way. Swap it for GlideLink FFT (PL) between PL ports.
+
+file_format: 1

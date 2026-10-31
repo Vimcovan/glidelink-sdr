@@ -35,6 +35,12 @@ outputs:
 -   domain: stream
     dtype: complex
 
+inputs:
+-   domain: glidelink_pl
+    dtype: sc16
+    label: pl_in
+    optional: true
+
 templates:
     imports: from gnuradio import glidelink
     make: glidelink.source(${address}, ${samp_rate}, ${freq}, ${bandwidth}, ${gain_mode}, ${gain})
@@ -50,6 +56,6 @@ documentation: |-
 
     Board: IP address of the board ('192.168.3.1'), a URI ('ip:...'), empty for the board the flowgraph runs on, or a full Soapy device string ('driver=glidelink,...').
 
-    Sample rate 0.52 to 61.44 MSPS; over the USB network link to a PC keep it near 5 MSPS or below. Center frequency 70 MHz to 6 GHz. Gain mode: the AD9361 gain control modes; the RX gain applies in manual mode. Frequency, gain and gain mode can be changed while running (variables, QT GUI Range).
+    Sample rate 0.52 to 50 MSPS; over the USB network link to a PC up to 20 MSPS without loss. Center frequency 70 MHz to 6 GHz. Gain mode: the AD9361 gain control modes; the RX gain applies in manual mode. Frequency, gain and gain mode can be changed while running (variables, QT GUI Range).
 
 file_format: 1

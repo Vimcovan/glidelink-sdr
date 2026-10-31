@@ -1,0 +1,288 @@
+options:
+  parameters:
+    author: GlideLink
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    description: 'A chain in the PL drawn in GRC (orange PL ports): RF -> NCO -> FFT (the RFNoC
+      FFT block core) -> host port 1. The spectrum of the full-rate signal reaches the PC as one
+      FFT in every KEEP.'
+    generate_options: qt_gui
+    id: glidelink_pl_fft_spectrum
+    output_language: python
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    title: GlideLink PL FFT spectrum
+    window_size: (1400,900)
+  states:
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: board
+  id: variable
+  parameters:
+    comment: board with the dsp image (hw/images/dsp.yaml)
+    value: '"192.168.3.1"'
+  states:
+    coordinate: [200, 8]
+    rotation: 0
+    state: enabled
+- name: args
+  id: variable
+  parameters:
+    comment: ''
+    value: '"driver=glidelink,uri=ip:" + board'
+  states:
+    coordinate: [320, 8]
+    rotation: 0
+    state: enabled
+- name: samp_rate
+  id: variable
+  parameters:
+    comment: the PL runs at this rate; the host port gets samp_rate / keep
+    value: 20e6
+  states:
+    coordinate: [520, 8]
+    rotation: 0
+    state: enabled
+- name: fft_size
+  id: variable
+  parameters:
+    comment: ''
+    value: '1024'
+  states:
+    coordinate: [640, 8]
+    rotation: 0
+    state: enabled
+- name: scaling
+  id: variable
+  parameters:
+    comment: 'Xilinx FFT schedule, 2 bits per radix-4 stage: shifts 2,2,2,1,1 = 2^-8
+      (1/N would be 2^-10 and leave weak bins at 0 LSB)'
+    value: 2 | 2 << 2 | 2 << 4 | 1 << 6 | 1 << 8
+  states:
+    coordinate: [760, 8]
+    rotation: 0
+    state: enabled
+- name: keep
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 0,0,1,1
+    label: Keep one FFT in
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: int
+    start: '5'
+    step: '1'
+    stop: '500'
+    value: '40'
+    widget: counter_slider
+  states:
+    coordinate: [200, 100]
+    rotation: 0
+    state: enabled
+- name: nco_freq
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 0,1,1,1
+    label: PL NCO shift (Hz)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: -samp_rate / 2
+    step: 100e3
+    stop: samp_rate / 2
+    value: '0'
+    widget: counter_slider
+  states:
+    coordinate: [360, 100]
+    rotation: 0
+    state: enabled
+- name: rx_freq
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 1,0,1,1
+    label: RX frequency (Hz)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: 70e6
+    step: 1e6
+    stop: 6e9
+    value: 915e6
+    widget: counter_slider
+  states:
+    coordinate: [520, 100]
+    rotation: 0
+    state: enabled
+- name: rx_gain
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 1,1,1,1
+    label: RX gain (dB)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0'
+    step: '1'
+    stop: '70'
+    value: '30'
+    widget: counter_slider
+  states:
+    coordinate: [680, 100]
+    rotation: 0
+    state: enabled
+- name: radio
+  id: glidelink_radio
+  parameters:
+    address: board
+    atten: '89'
+    bandwidth: '0'
+    comment: ''
+    gain: rx_gain
+    gain_mode: '"manual"'
+    rx_freq: rx_freq
+    samp_rate: samp_rate
+    tx_freq: '0'
+  states:
+    coordinate: [16, 260]
+    rotation: 0
+    state: enabled
+- name: nco
+  id: glidelink_nco
+  parameters:
+    args: args
+    comment: ''
+    freq: nco_freq
+    phase: '0'
+    samp_rate: samp_rate
+    slot: '3'
+  states:
+    coordinate: [260, 260]
+    rotation: 0
+    state: enabled
+- name: fft
+  id: glidelink_fft
+  parameters:
+    args: args
+    bypass: 'False'
+    comment: ''
+    cp_ins: '[]'
+    cp_rem: '[]'
+    direction: '"forward"'
+    keep: keep
+    order: '"normal"'
+    output: '"complex"'
+    scaling: scaling
+    size: fft_size
+    slot: '1'
+  states:
+    coordinate: [480, 260]
+    rotation: 0
+    state: enabled
+- name: host
+  id: glidelink_host_source
+  parameters:
+    args: args
+    buffer_length: '65536'
+    comment: one FFT per packet
+    headers: 'True'
+    type: complex
+  states:
+    coordinate: [720, 260]
+    rotation: 0
+    state: enabled
+- name: mag2
+  id: blocks_complex_to_mag_squared
+  parameters:
+    comment: ''
+    vlen: '1'
+  states:
+    coordinate: [16, 420]
+    rotation: 0
+    state: enabled
+- name: db
+  id: blocks_nlog10_ff
+  parameters:
+    comment: dB relative to full scale (sc16 full scale = 1.0)
+    k: '0'
+    n: '10'
+    vlen: '1'
+  states:
+    coordinate: [200, 420]
+    rotation: 0
+    state: enabled
+- name: s2v
+  id: blocks_stream_to_vector
+  parameters:
+    comment: ''
+    num_items: fft_size
+    type: float
+    vlen: '1'
+  states:
+    coordinate: [380, 420]
+    rotation: 0
+    state: enabled
+- name: spectrum
+  id: qtgui_vector_sink_f
+  parameters:
+    autoscale: 'False'
+    average: '1.0'
+    comment: ''
+    grid: 'True'
+    gui_hint: 2,0,8,2
+    name: '"Spectrum computed in the PL (RFNoC FFT core)"'
+    nconnections: '2'
+    label1: '"latest"'
+    label2: '"peak hold"'
+    ref_level: '0'
+    update_time: '0.10'
+    vlen: fft_size
+    x_axis_label: '"Frequency offset"'
+    x_start: -samp_rate / 2e6
+    x_step: samp_rate / fft_size / 1e6
+    x_units: '"MHz"'
+    y_axis_label: '"Power"'
+    y_units: '"dBFS"'
+    ymax: '0'
+    ymin: '-100'
+  states:
+    coordinate: [600, 400]
+    rotation: 0
+    state: enabled
+
+- name: peak
+  id: epy_block
+  parameters:
+    _source_code: "import numpy as np\nfrom gnuradio import gr\n\n\nclass blk(gr.sync_block):\n    \"\"\"Peak hold, per bin the maximum of the input vectors, falling by decay_db per vector\"\"\"\n\n    def __init__(self, vlen=1024, decay_db=0.05):\n        gr.sync_block.__init__(self, name=\"Peak hold\", in_sig=[(np.float32, vlen)], out_sig=[(np.float32, vlen)])\n        self.decay_db = decay_db\n        self.hold = None\n\n    def work(self, input_items, output_items):\n        for k, v in enumerate(input_items[0]):\n            self.hold = v.copy() if self.hold is None else np.maximum(v, self.hold - self.decay_db)\n            output_items[0][k][:] = self.hold\n        return len(input_items[0])\n"
+    comment: 'bursts of the other board are short (about 8 % of the time): the peak hold shows them'
+    decay_db: '0.05'
+    vlen: fft_size
+  states:
+    _io_cache: ('Peak hold', 'blk', [('vlen', '1024'), ('decay_db', '0.05')], [('0', 'float', 1024)],
+      [('0', 'float', 1024)], 'Peak hold, per bin the maximum of the input vectors, falling by decay_db per vector',
+      ['decay_db'])
+    coordinate: [600, 520]
+    rotation: 0
+    state: enabled
+
+connections:
+- [radio, '0', nco, '0']
+- [nco, '0', fft, '0']
+- [fft, '0', host, '0']
+- [host, '0', mag2, '0']
+- [mag2, '0', db, '0']
+- [db, '0', s2v, '0']
+- [s2v, '0', spectrum, '0']
+- [s2v, '0', peak, '0']
+- [peak, '0', spectrum, '1']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2

@@ -60,12 +60,16 @@ tx.txCyclic(x);                       % 在板上循环发送，不占网络
 | GlideLink Source / Sink | 板子的射频接收 / 发射：填板子地址、采样率、中心频率、带宽、增益模式与增益（或发射衰减），运行中可改 |
 | GlideLink Control | 路由、驱动参数、寄存器；周期回读状态 |
 | GlideLink Host Source / Sink | 主机端口 1：PL 槽位中模块的数据 |
-| GlideLink NCO / FIR（software / PL） | 示例模块的软件模型与 PL 代理块 |
+| GlideLink NCO / FIR / FFT（software / PL） | 模块的软件模型与 PL 代理块；FFT 是 Ettus RFNoC FFT 块的处理核心 |
+| GlideLink Radio (PL) | 射频在 PL 一侧的收发两端（`rf_rx` / `rf_tx`）与射频设置 |
 
-示例：`sw/gr-glidelink/examples/ota_qpsk.grc`（两板之间的 QPSK，频谱、瀑布图、同步前后的星座）、`agc_fast_attack.grc`、
-`jscc_link_console.grc`。不经 GRC 的脚本在 `sw/gnuradio/`。
+PL 块的橙色端口像 RFNoC 块一样在 GRC 中直接连线：连线就是 PL 内部的路由，数据不经过 GNU Radio，主机端口块是 PL 与电脑交接数据的地方
+（[`sw/gr-glidelink/README.md`](../sw/gr-glidelink/README.md)）。
 
-电脑上的 GNU Radio 经 USB 网口连续传输，单块板约 5 MSPS 以内可靠；更高的采样率在板上运行流程图（`uri=local:` 或板子地址留空）。
+示例：`sw/gr-glidelink/examples/ota_qpsk.grc`（两板之间的 QPSK，频谱、瀑布图、同步前后的星座）、`pl_fft_spectrum.grc`
+（射频 → NCO → FFT 全在 PL 内，20 MSPS 的频谱以每 KEEP 帧一帧送到电脑，需 `dsp` 镜像）、`agc_fast_attack.grc`、`jscc_link_console.grc`。不经 GRC 的脚本在 `sw/gnuradio/`。
+
+电脑上的 GNU Radio 经 USB 网口连续传输，单块板 20 MSPS 以内无丢失；更高的采样率在 PL 中先做处理或抽取（如 FFT 模块的 KEEP），或在板上运行流程图（`uri=local:` 或板子地址留空）。
 电脑端的安装与图形桌面见 [`pc_setup.md`](pc_setup.md)。
 
 ### 3.3 视频经离线图传链路
@@ -112,6 +116,8 @@ Communications Toolbox Support Package for ADALM-Pluto 可以按地址连接板�
 
 1. 按 [`design.md`](design.md) 第 5 节的接口写模块：AXI4-Stream 输入输出（sc16 或自定义格式）、AXI4-Lite 寄存器、`flush` 输入；
    附模块说明文件 `module.yaml`、参考模型 `model.py`、仿真测试平台，放在 `hw/modules/<id>/`（参照 `nco`、`fir`）。
+   第三方 RTL 放进单独的库目录、按原样保留（如 `hw/modules/uhd_rfnoc`，Ettus UHD 的 LGPL 源文件），模块在 `module.yaml` 的 `uses` 中引用，
+   适配写在模块自己的包装里（`hw/modules/fft/glidelink_fft.sv` 把 RFNoC 的 CtrlPort 与数据流换成槽位的 AXI4-Lite 与 AXI4-Stream）。
 2. 在 `hw/images/<镜像>.yaml` 中把模块放进槽位，选处理时钟（100 / 200 / 250 MHz）与 RTL 参数。
 3. 构建：`GLIDELINK_IMAGE=<镜像> vivado -mode batch -source system_project.tcl`（`hw/projects/fmcomms2_pynqzu`，环境见
    [`hw/README.md`](../hw/README.md)），设备树叠加用 `hw/dts/build_dtbo.sh`。
@@ -125,7 +131,7 @@ Communications Toolbox Support Package for ADALM-Pluto 可以按地址连接板�
 | 采样率 | 0.52～50 MSPS（第三方子卡的 TX 接口在 61.44 MSPS 时余量不足，见 `hw/README.md`） |
 | 射频 | AD9361：70 MHz～6 GHz（发射 47 MHz 起），带宽至 56 MHz；每块板 1 收 1 发 |
 | 板上收发 | 50 MSPS 全双工逐样点无误（C 程序、桥接服务的 C 采集） |
-| 经 USB 网口的连续流 | 约 5 MSPS 可靠，上限约 7 MSPS |
+| 经 USB 网口的连续流 | 收、发各 20 MSPS 无丢失，上限约 22～25 MSPS |
 | 发→收固定延迟 | 56 个采样（同一块板，数字滤波与 FIFO） |
 
 已知问题与注意事项见 [`known_issues.md`](known_issues.md)。

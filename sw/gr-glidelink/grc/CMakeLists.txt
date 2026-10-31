@@ -20,6 +20,10 @@ install(FILES
     glidelink_nco.block.yml
     glidelink_fir_model.block.yml
     glidelink_fir.block.yml
+    glidelink_fft_model.block.yml
+    glidelink_fft.block.yml
+    glidelink_radio.block.yml
+    glidelink_pl.domain.yml
     glidelink_jscc_tx_control.block.yml
     glidelink_jscc_rx_view.block.yml
     glidelink_jscc_rx_symbols.block.yml

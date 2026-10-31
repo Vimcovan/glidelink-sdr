@@ -57,6 +57,7 @@ class host_source(gr.sync_block):
     def __init__(self, args="driver=glidelink", item_type="complex", headers=True, buffer_length=65536):
         self.dtype, self.fmt = _types(item_type)
         gr.sync_block.__init__(self, name="GlideLink Host Source", in_sig=None, out_sig=[self.dtype])
+        self.pl_args, self.pl_inputs, self.pl_outputs = args, {"0": "host1_rx"}, {}   # PL port (pl.py)
         self.dev = SoapySDR.Device(args)
         self.sargs = _stream_args(headers, buffer_length)
         self.stream = None
@@ -102,6 +103,7 @@ class host_sink(gr.sync_block):
     def __init__(self, args="driver=glidelink", item_type="complex", headers=True, buffer_length=65536):
         self.dtype, self.fmt = _types(item_type)
         gr.sync_block.__init__(self, name="GlideLink Host Sink", in_sig=[self.dtype], out_sig=None)
+        self.pl_args, self.pl_inputs, self.pl_outputs = args, {}, {"0": "host1_tx"}   # PL port (pl.py)
         self.dev = SoapySDR.Device(args)
         self.sargs = _stream_args(headers, buffer_length)
         self.stream = None

@@ -36,7 +36,7 @@ SoapySDR 模块，经 libiio 访问 ADI 的 ad9361 / cf_axi_adc / cf_axi_dds 驱
 - 采样率上限 50 MSPS（第三方子卡的 TX 接口余量，见 `hw/README.md`）。
 - 网络：PC 上用 `uri=ip:<板子>`，经板上的 iiod。iiod 只在启动时扫描设备，`hw/scripts/load_overlay.sh` 加载叠加后会重启它。
   libiio 超时 1 s，可能更慢的操作（改采样率换 FIR 最长约 1.4 s、写驱动参数、重新初始化）临时放宽到 10 s，
-  否则经网络时超时会断开与 iiod 的连接。经板子的 USB 网口实测 RX、TX 各 5 MSPS 无丢失，上限约 7.3 MSPS。
+  否则经网络时超时会断开与 iiod 的连接。经板子的 USB 网口实测 RX、TX 各 20 MSPS 无丢失，上限约 22～25 MSPS（`docs/known_issues.md` 1.3）。
 
 ## 构建
 

@@ -22,6 +22,8 @@ import SoapySDR
 import yaml
 from gnuradio import gr
 
+from .pl import slot_ports
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # installed next to this file; in the source tree, hw/modules
 _DIRS = [os.path.join(_HERE, "modules"), os.path.join(_HERE, "..", "..", "..", "..", "hw", "modules")]
@@ -113,6 +115,7 @@ class nco(gr.basic_block):
 
     def __init__(self, args="driver=glidelink", slot=1, samp_rate=1e6, freq=0.0, phase=0.0):
         gr.basic_block.__init__(self, name="GlideLink NCO (PL)", in_sig=None, out_sig=None)
+        self.pl_args, self.pl_inputs, self.pl_outputs = slot_ports(args, slot)
         self.regs = slot_registers(args, slot, "nco")
         self.samp_rate = samp_rate
         self.regs.write("FREQ", freq_word(freq, samp_rate))
@@ -166,6 +169,7 @@ class fir(gr.basic_block):
 
     def __init__(self, args="driver=glidelink", slot=2, taps=(32767,), shift=15):
         gr.basic_block.__init__(self, name="GlideLink FIR (PL)", in_sig=None, out_sig=None)
+        self.pl_args, self.pl_inputs, self.pl_outputs = slot_ports(args, slot)
         self.regs = slot_registers(args, slot, "fir")
         self.n = self.regs.read("TAPS")
         self.set_shift(shift)
@@ -179,3 +183,134 @@ class fir(gr.basic_block):
 
     def set_shift(self, shift):
         self.regs.write("SHIFT", int(shift))
+
+
+# ---------------------------------------------------------------------------
+# FFT (the RFNoC FFT block core)
+
+FFT_ORDERS = {"normal": 0, "reverse": 1, "natural": 2, "bit_reverse": 3}
+FFT_OUTPUTS = {"complex": 0, "magnitude": 1, "magnitude_squared": 2}
+
+
+def _log2(size):
+    n = int(size).bit_length() - 1
+    if size != 1 << n or not 3 <= n <= 12:
+        raise ValueError(f"FFT size {size}: a power of two, 8 .. 4096")
+    return n
+
+
+class fft_model(gr.basic_block):
+    """FFT / IFFT as the PL module computes it, in floating point (the Xilinx FFT core is not
+    modelled bit for bit; the PL output agrees to about 1 LSB). Complex in / out, sc16 full
+    scale 1.0; one cyclic prefix length each way (the PL module takes lists)."""
+
+    def __init__(self, size=1024, direction="forward", order="normal", output="complex",
+                 scaling=-1, keep=1, cp_rem=0, cp_ins=0):
+        gr.basic_block.__init__(self, name="GlideLink FFT (software)", in_sig=[np.complex64],
+                                out_sig=[np.complex64])
+        self.m = model("fft")
+        self.kcnt = 0
+        self.configure(size, direction, order, output, scaling, keep, cp_rem, cp_ins)
+
+    def configure(self, size, direction, order, output, scaling, keep, cp_rem, cp_ins):
+        n = _log2(size)
+        self.kw = {"n_log2": n, "scaling": None if scaling < 0 else int(scaling),
+                   "direction": 1 if direction == "forward" else 0, "order": FFT_ORDERS[order],
+                   "magnitude": FFT_OUTPUTS[output], "cp_rem": int(cp_rem), "cp_ins": int(cp_ins)}
+        self.keep = max(int(keep), 1)
+        self.blk, self.plen = (1 << n) + int(cp_rem), (1 << n) + int(cp_ins)
+        self.params = (size, direction, order, output, scaling, keep, cp_rem, cp_ins)
+
+    def _set(self, k, v):
+        p = list(self.params)
+        p[k] = v
+        self.configure(*p)
+
+    def set_size(self, size): self._set(0, size)
+    def set_direction(self, direction): self._set(1, direction)
+    def set_order(self, order): self._set(2, order)
+    def set_output(self, output): self._set(3, output)
+    def set_scaling(self, scaling): self._set(4, scaling)
+    def set_keep(self, keep): self._set(5, keep)
+
+    def forecast(self, noutput_items, ninputs):
+        return [self.blk] * ninputs
+
+    def general_work(self, input_items, output_items):
+        x, out = input_items[0], output_items[0]
+        produced = consumed = 0
+        while consumed + self.blk <= len(x):
+            if self.kcnt == 0:
+                if produced + self.plen > len(out):
+                    break
+                words = sc16.from_complex(x[consumed:consumed + self.blk])
+                out[produced:produced + self.plen] = sc16.to_complex(self.m.process(words, **self.kw))
+                produced += self.plen
+            self.kcnt = (self.kcnt + 1) % self.keep
+            consumed += self.blk
+        self.consume(0, consumed)
+        return produced
+
+
+class fft(gr.basic_block):
+    """The FFT in its PL slot: writes its registers (the RFNoC FFT block's, and KEEP) and
+    enables it. size 8 .. 4096; scaling -1: 1/N; cp_rem / cp_ins: the cyclic prefix lists
+    (lengths, repeated). A change of size or of cp_ins resets the module between packets."""
+
+    def __init__(self, args="driver=glidelink", slot=1, size=1024, direction="forward", order="normal",
+                 output="complex", scaling=-1, keep=1, cp_rem=(), cp_ins=(), bypass=False):
+        gr.basic_block.__init__(self, name="GlideLink FFT (PL)", in_sig=None, out_sig=None)
+        self.pl_args, self.pl_inputs, self.pl_outputs = slot_ports(args, slot)
+        self.regs = slot_registers(args, slot, "fft")
+        self.m = model("fft")
+        self._scaling = scaling
+        self.set_direction(direction)
+        self.set_order(order)
+        self.set_output(output)
+        self.set_keep(keep)
+        self.set_bypass(bypass)
+        self.set_cp_rem(cp_rem)
+        self.set_cp_ins(cp_ins)
+        self.set_size(size)
+        self.regs.write("CONTROL", 1)
+
+    def set_size(self, size):
+        self._n = _log2(size)
+        self.regs.write("LENGTH_LOG2", self._n)
+        self.set_scaling(self._scaling)
+
+    def set_scaling(self, scaling):
+        self._scaling = scaling
+        n = getattr(self, "_n", 12)
+        self.regs.write("SCALING", self.m.default_scaling(n) if scaling < 0 else int(scaling))
+
+    def set_direction(self, direction):
+        self.regs.write("DIRECTION", 1 if direction == "forward" else 0)
+
+    def set_order(self, order):
+        self.regs.write("ORDER", FFT_ORDERS[order])
+
+    def set_output(self, output):
+        self.regs.write("MAGNITUDE", FFT_OUTPUTS[output])
+
+    def set_keep(self, keep):
+        self.regs.write("KEEP", max(int(keep), 1))
+
+    def set_bypass(self, bypass):
+        self.regs.write("BYPASS", int(bool(bypass)))
+
+    def _list(self, prefix, lengths):
+        self.regs.write(f"{prefix}_LIST_CLR", 1)
+        for c in lengths:
+            self.regs.write(f"{prefix}_LEN", int(c))
+            self.regs.write(f"{prefix}_LIST_LOAD", 1)
+
+    def set_cp_rem(self, lengths):
+        self._list("CP_REM", lengths)
+
+    def set_cp_ins(self, lengths):
+        self._list("CP_INS", lengths)
+
+    def overflow(self):
+        """FFT overflow since the last call (the core's sticky bit, cleared on read)"""
+        return bool(self.regs.read("OVERFLOW") & 1)
