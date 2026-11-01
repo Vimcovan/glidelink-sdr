@@ -382,8 +382,12 @@ private:
 				memcpy(&h, pkt.data(), HDR);
 				if (h.magic != MAGIC || h.type != TYPE_DATA)
 					continue;
-				if (!first && h.seq != expect)
+				if (!first && h.seq != expect) {
 					cur.lost = true;
+					if (++gaps_ <= 20)
+						fprintf(stderr, "glidelink streamd: RX packets %u..%u lost (gap %u)\n", expect,
+							h.seq - 1, gaps_);
+				}
 				first = false;
 				expect = h.seq + 1;
 				size_t len = std::min<size_t>(size_t(k) - HDR, bufBytes_ - cur.len);
@@ -471,6 +475,7 @@ private:
 	uint64_t myCapacity_ = 0, boardCapacity_ = 0;
 	uint32_t statusSeq_ = 0;
 	uint32_t dataSeq_ = 0;                  // TX: data packets sent
+	uint32_t gaps_ = 0;                     // RX: sequence gaps seen
 	std::thread th_;
 	std::mutex m_;
 	std::condition_variable cv_;

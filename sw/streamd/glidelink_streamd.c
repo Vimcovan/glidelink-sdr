@@ -156,6 +156,7 @@ static void rx_loop(struct stream *st)
 	size_t payload = (st->frame - HDR) / st->step * st->step;
 	uint64_t sent = 0, consumed = 0;
 	uint32_t seq = 0;
+	int waits = 0;                          // consecutive 100 ms waits for room at the PC
 	struct hdr hdrs[BATCH];
 	struct iovec iov[BATCH][2];
 	struct mmsghdr msgs[BATCH];
@@ -191,8 +192,14 @@ static void rx_loop(struct stream *st)
 			}
 			if (cnt == 0) {
 				rx_status(st, &consumed, 100);  // no room at the PC: wait for its status
+				if (++waits == 20)              // 2 s without room: say how the accounts stand
+					syslog(LOG_WARNING, "rx: no room at the PC for 2 s: sent %llu, PC consumed %llu, "
+					       "in flight %llu of %llu, packets %u", (unsigned long long)sent,
+					       (unsigned long long)consumed, (unsigned long long)(sent - consumed),
+					       (unsigned long long)st->peer_capacity, seq);
 				continue;
 			}
+			waits = 0;
 			if (gso) {
 				// the pairs of this batch, in order, as one message (only the last packet of a
 				// buffer can be shorter, and it is the last of its batch)
