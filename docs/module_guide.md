@@ -18,6 +18,17 @@
 
 PL 块按模块 ID 自己找槽位（槽位参数填 -1，默认值），换镜像、调整槽位顺序都不用改流程图。
 
+从写好 RTL 到在 GRC 里使用，是仓库根目录 `glidelink.py` 的四条命令（第 5 节是完整的例子）：
+
+```bash
+python glidelink.py new <id>              # 骨架：直通模块，能直接测试、构建
+python glidelink.py test <id>             # 仿真，与参考模型逐拍比较，并检查寄存器读回
+python glidelink.py build <id> [<id> ...] --name <镜像>
+python glidelink.py deploy <板子地址> <镜像>
+```
+
+再重新安装 gr-glidelink，模块的两个块就出现在 GRC 中。`python glidelink.py status <板子地址>` 显示板子的开机镜像和各槽位的模块。
+
 ## 1. 模块的端口
 
 ```verilog
@@ -141,11 +152,90 @@ class Model(module_desc.RegisterModel):
 软件块与 PL 块用同一段"参数 → 寄存器"的换算：软件块把寄存器写给 `Model`，PL 块写给板上的槽位。所以软件块就是 PL 模块在电脑上的替身，
 流程图里把一个换成另一个（PL 块前后接主机端口源 / 汇或射频块），输出应当相同（`sw/tests/gr_proxy_swap.py`）。
 
-## 4. 镜像、仿真与安装
+## 4. 命令
 
-| 步骤 | 做法 |
+| 命令 | 做什么 |
 |---|---|
-| 仿真 | `hw/library/glidelink_module/tb/run_module_sim.ps1 hw/modules/<id> [-Vectors <目录>]`：通用测试平台，按 `regs.hex` 写寄存器、送 `in.hex`、与 `out.hex` 逐拍比较（随机间隙与反压） |
-| 镜像 | `hw/images/<镜像>.yaml` 列出各槽位的模块；`GLIDELINK_IMAGE=<镜像>` 构建（`hw/README.md`） |
-| 换镜像 | 用户指南第 4 节 |
-| GNU Radio | 重新运行 gr-glidelink 的安装（Windows：`D:\radioconda\python.exe sw\gr-glidelink\install_conda.py`；Linux：CMake 安装），新模块的两个块出现在 GRC 的 GlideLink / FPGA modules 分类中 |
+| `new <id> [--name 名字]` | 建 `hw/modules/<id>/`：`module.yaml`（寄存器 CONTROL.enable / soft_reset，ID 值自动选一个不重复的）、`glidelink_<id>.v`（一级流水的直通，端口表按 yaml 生成）、`model.py`（直通的 `Model`）。不改任何东西就能通过 `test`、能构建 |
+| `test <id> [--case K]` | 对 `module.yaml` 中 `tests` 的每一项（块参数，或寄存器名加原始值）：按与 GNU Radio 块相同的"参数 → 寄存器"换算写寄存器，送 6000 个随机 sc16 样点（满幅噪声、单音、小信号、极值，随机长度的包），测试平台随机插入间隙与反压，输出与 `Model` 逐拍比较（`tlast`、`tuser` 随样点），最后读回全部可读寄存器与 `Model.read` 比较。输出个数与输入不同的模块（如 FFT）在输入后补一段把模块里留着的数据推出来，比较全部应出的输出，模型不逐比特时允许 `tolerance` LSB；`test_input_scale` 缩小激励幅度。没有参考模型时只检查能仿真、有输出。向量在 `hw/modules/<id>/build/test<K>/`。需要 Windows 上的 Vivado（xsim） |
+| `build <镜像>` 或 `build <id> ... --name <镜像>` | 镜像文件 `hw/images/<镜像>.yaml`，或直接列模块（放在槽位 1、2……，槽位 0 是外壳的直通，写成 `hw/images/<镜像>.yaml` 留着下次用）；跑 Vivado（约一小时，打印各阶段），产物与时序余量：`hw/build/<镜像>/glidelink_<镜像>.bit`、`.hwh`、`image.json` |
+| `deploy <板子> [<镜像>]` | 不写镜像时用最近构建的。拷到板子开机镜像所在目录（设备树叠加与外壳无关，沿用板上现有的），改 `/etc/default/glidelink-bridge`，重启，等桥接服务把镜像加载好，逐个槽位读 ID 与 `image.json` 核对。`--no-reboot` 只设开机镜像 |
+| `status <板子>` | 开机镜像与各槽位的模块（按 ID 认出 `hw/modules` 中的模块） |
+
+本机的工具与板子的登录在环境变量或仓库根目录的 `glidelink.local.yaml`（不进 git）中：`VIVADO`（vivado 可执行文件）、`ADI_HDL_DIR`（编好库的 ADI HDL，见 `hw/README.md`）、
+`GLIDELINK_SSH_KEY`、`GLIDELINK_SSH_USER`（默认 root）。
+
+上板核对软件块与 PL 块：`python sw/tests/gr_module_swap.py <id> --args driver=glidelink,uri=ip:<板子地址>`（在装了 gr-glidelink 的 Python 中运行，
+Windows 为 `D:\radioconda\python.exe`）。它用 `tests` 的每一项参数，把同一段信号分别送进软件块和经主机端口 1 送进 PL 块，逐样点比较。
+
+底层的单项操作仍可单独用：`hw/library/glidelink_module/tb/run_module_sim.ps1 hw/modules/<id> -Vectors <目录>`（按自己的 `regs.hex`、`in.hex`、`out.hex`、
+`reads.hex` 仿真），`GLIDELINK_IMAGE=<镜像>` 直接跑 Vivado（`hw/README.md`），手动换镜像见用户指南第 4 节。
+
+## 5. 例子：增益加直流偏置
+
+目标：I、Q 各乘一个增益再加一个偏置，饱和到 16 位；GRC 里三个参数（增益、I 偏置、Q 偏置）运行中可调。完整的结果在 `hw/modules/gain_offset/`。
+
+1. 建骨架，先确认它本身能通过：
+
+   ```bash
+   python glidelink.py new gain_offset --name "Gain and offset"
+   python glidelink.py test gain_offset
+   ```
+
+2. `module.yaml`：加三个寄存器，块参数与换算，测试用例。
+
+   ```yaml
+   registers:
+     - name: CONTROL
+       fields:
+         - {name: enable, bits: 0}
+         - {name: soft_reset, bits: 1, access: pulse}
+     - {name: GAIN, width: 16, signed: true, default: 16384, doc: "gain, 1.0 = 16384"}
+     - {name: OFFSET_I, width: 16, signed: true}
+     - {name: OFFSET_Q, width: 16, signed: true}
+   block:
+     params:
+       - {name: gain, label: Gain, type: real, default: 1.0, check: "-2 <= gain < 2", write: {GAIN: "gain * 16384"}}
+       - {name: offset_i, label: Offset I, type: real, default: 0.0, write: {OFFSET_I: "offset_i * 32768"}}
+       - {name: offset_q, label: Offset Q, type: real, default: 0.0, write: {OFFSET_Q: "offset_q * 32768"}}
+     start: {CONTROL: 1}
+   tests:
+     - {}
+     - {gain: 1.7, offset_i: 0.25, offset_q: -0.5}
+     - {gain: -2.0, offset_i: -1.0, offset_q: 0.999}
+   ```
+
+   `python hw/scripts/gen_module.py ports gain_offset` 打印新的端口表（多了 `gain`、`offset_i`、`offset_q` 三个输入），复制进 RTL。
+
+3. RTL（`glidelink_gain_offset.v`）：第一级算乘积，第二级舍入、加偏置、饱和，两级一起受反压控制，`tuser` / `tlast` 随样点走。没有一行总线代码。
+
+4. 参考模型（`model.py`）中的 `process`：
+
+   ```python
+   s16 = lambda v: (v & 0xFFFF) - ((v & 0x8000) << 1)
+   g = s16(self.regs["GAIN"])
+   i, q = unpack(words)
+   return pack(sat16(((i * g + (1 << 13)) >> 14) + s16(self.regs["OFFSET_I"])),
+               sat16(((q * g + (1 << 13)) >> 14) + s16(self.regs["OFFSET_Q"])))
+   ```
+
+5. 仿真、构建、部署：
+
+   ```bash
+   python glidelink.py test gain_offset                         # 4 组，各 6000 个样点逐拍一致，寄存器读回一致
+   python glidelink.py build gain_offset nco --name tutorial    # 槽位 1 增益偏置，槽位 2 NCO
+   python glidelink.py deploy 192.168.3.1 tutorial              # 重启后核对槽位
+   ```
+
+6. 重新安装 gr-glidelink，GRC 的 GlideLink / FPGA modules 中出现 GlideLink Gain and offset (PL) 与 (software)。
+   上板核对：`python sw/tests/gr_module_swap.py gain_offset`。示例 `sw/gr-glidelink/examples/pl_gain_offset.grc`：射频 → NCO → 增益偏置 → 主机端口 1，
+   拖动滑块时 I / Q 的直流台阶和 0 Hz 处的谱线随之变化。
+
+   ![示例运行中：I、Q 分别停在偏置 0.3、-0.2，0 Hz 处是偏置的谱线](img/pl_gain_offset.png)
+
+   2026-11-01 在接收板上：`test` 4 组仿真逐拍一致；`build` 13 分钟，时序满足；`deploy` 核对槽位通过；`gr_module_swap.py gain_offset` 4 组各 131072 个样点与软件块完全相同。
+
+## 6. 安装 GNU Radio 块
+
+新模块或改了 `module.yaml` 之后重新运行 gr-glidelink 的安装（Windows：`D:\radioconda\python.exe sw\gr-glidelink\install_conda.py`；
+Linux：CMake 安装），模块的两个块出现在 GRC 的 GlideLink / FPGA modules 分类中。

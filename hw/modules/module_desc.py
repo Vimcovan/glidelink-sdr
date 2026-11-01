@@ -285,7 +285,10 @@ class RegisterModel:
             return int(eval(str(reg["value"]), {"__builtins__": {}}, dict(self.params)))
         v = self.on_read(name)
         if v is None:
-            return 0 if reg["access"] == "wo" else self.regs[name]
+            v = 0 if reg["access"] == "wo" else self.regs[name]
+        w = reg["width"]
+        if reg.get("signed") and w < 32:     # sign-extended, as the register file reads it
+            v = (int(v) & ((1 << w) - 1)) - ((int(v) >> (w - 1) & 1) << w)
         return int(v) & 0xFFFFFFFF
 
     def on_write(self, name, value):

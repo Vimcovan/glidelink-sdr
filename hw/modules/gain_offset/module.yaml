@@ -1,0 +1,38 @@
+# GlideLink user module (docs/module_guide.md)
+id: gain_offset
+name: Gain and offset
+rtl: glidelink_gain_offset.v
+top: glidelink_gain_offset
+model: model.py
+id_value: 0x47414931          # "GAI1": the ID register, by which the PL block finds the slot
+version: 1.0.0
+data:
+  input: sc16                 # {Q[31:16], I[15:0]}
+  output: sc16
+  tuser: passed with its sample
+function: >-
+  I and Q each: sat16(((x * GAIN + 2^13) >> 14) + OFFSET), GAIN signed (1.0 = 16384),
+  OFFSET_I / OFFSET_Q signed 16 bit. Disabled: samples pass unchanged.
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
+  - name: CONTROL
+    fields:
+      - {name: enable, bits: 0, doc: "1 = process, 0 = pass unchanged"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "pipeline emptied"}
+  - {name: GAIN, width: 16, signed: true, default: 16384, doc: "gain, 1.0 = 16384"}
+  - {name: OFFSET_I, width: 16, signed: true, doc: "added to I after the gain"}
+  - {name: OFFSET_Q, width: 16, signed: true, doc: "added to Q after the gain"}
+block:                        # the GNU Radio blocks (PL and software), same parameters
+  doc: Gain and DC offset (x * gain + offset, saturated).
+  params:
+    - {name: gain, label: Gain, type: real, default: 1.0, check: "-2 <= gain < 2",
+       write: {GAIN: "gain * 16384"}, doc: "-2 to 2, steps of 1/16384"}
+    - {name: offset_i, label: Offset I, type: real, default: 0.0, check: "-1 <= offset_i < 1",
+       write: {OFFSET_I: "offset_i * 32768"}, doc: "full scale 1.0"}
+    - {name: offset_q, label: Offset Q, type: real, default: 0.0, check: "-1 <= offset_q < 1",
+       write: {OFFSET_Q: "offset_q * 32768"}}
+  start: {CONTROL: 1}
+tests:                        # python glidelink.py test gain_offset: block parameters per case
+  - {}
+  - {gain: 1.7, offset_i: 0.25, offset_q: -0.5}
+  - {gain: -2.0, offset_i: -1.0, offset_q: 0.999}
+  - {gain: 0.0001, offset_i: 0.001}

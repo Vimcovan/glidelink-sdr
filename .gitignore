@@ -4,3 +4,4 @@ build/
 .Xil/
 __pycache__/
 sw/matlab/official/
+glidelink.local.yaml

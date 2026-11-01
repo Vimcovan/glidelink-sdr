@@ -114,17 +114,22 @@ Communications Toolbox Support Package for ADALM-Pluto 可以按地址连接板�
 
 ## 5. 加入自己的 FPGA 模块
 
-完整说明见 [`module_guide.md`](module_guide.md)。
+开发者只写模块 RTL（AXI4-Stream 输入输出、`flush`，寄存器是普通端口）、`module.yaml`（寄存器表、GNU Radio 块参数及其到寄存器的换算）
+和可选的参考模型 `model.py`；AXI4-Lite 寄存器文件、GRC 的 PL 块与软件块、测试向量都由脚本生成。仓库根目录的四条命令：
 
-1. 在 `hw/modules/<id>/` 写模块 RTL（AXI4-Stream 输入输出、`flush`，寄存器是普通端口）、`module.yaml`（寄存器表与 GNU Radio 块参数）
-   和可选的参考模型 `model.py`（参照 `nco`、`fir`）。AXI4-Lite 寄存器文件由脚本按寄存器表生成。
-   第三方 RTL 放进单独的库目录、按原样保留（如 `hw/modules/uhd_rfnoc`，Ettus UHD 的 LGPL 源文件），模块在 `module.yaml` 的 `uses` 中引用，
-   适配写在模块自己的包装里（`hw/modules/fft/glidelink_fft.sv` 把 RFNoC 的 CtrlPort 与数据流换成槽位的 AXI4-Lite 与 AXI4-Stream）。
-2. 在 `hw/images/<镜像>.yaml` 中把模块放进槽位，选处理时钟（100 / 200 / 250 MHz）与 RTL 参数。
-3. 构建：`GLIDELINK_IMAGE=<镜像> vivado -mode batch -source system_project.tcl`（`hw/projects/fmcomms2_pynqzu`，环境见
-   [`hw/README.md`](../hw/README.md)），设备树叠加用 `hw/dts/build_dtbo.sh`。
-4. 重新安装 gr-glidelink，模块的软件块（参考模型）与 PL 块（只写寄存器，数据经橙色连线在 PL 内流动）由 `module.yaml` 自动生成。
-   软件原型阶段用软件块，换成 PL 块后输出应相同（`sw/tests/gr_proxy_swap.py`）；PL 块按模块 ID 自己找槽位。
+```bash
+python glidelink.py new gain_offset                         # 骨架（直通），能直接测试、构建
+python glidelink.py test gain_offset                        # xsim 仿真，与参考模型逐拍比较、核对寄存器读回
+python glidelink.py build gain_offset nco --name tutorial   # 镜像：列出的模块放在槽位 1、2……（约一小时）
+python glidelink.py deploy 192.168.3.1 tutorial             # 设为开机镜像、重启、核对各槽位的模块
+```
+
+然后重新安装 gr-glidelink，模块的两个块出现在 GRC 的 GlideLink / FPGA modules 中；PL 块按模块 ID 自己找槽位。
+完整说明与一个从零写起的例子见 [`module_guide.md`](module_guide.md)。
+
+第三方 RTL 放进单独的库目录、按原样保留（如 `hw/modules/uhd_rfnoc`，Ettus UHD 的 LGPL 源文件），模块在 `module.yaml` 的 `uses` 中引用，
+适配写在模块自己的包装里（`hw/modules/fft/glidelink_fft.sv` 把 RFNoC 的 CtrlPort 与数据流换成槽位的 AXI4-Lite 与 AXI4-Stream，`bus: module`）。
+处理时钟（100 / 200 / 250 MHz）与 RTL 参数在镜像文件 `hw/images/<镜像>.yaml` 中按槽位设定。
 
 ## 6. 性能与限制（概要）
 

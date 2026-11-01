@@ -1,0 +1,252 @@
+options:
+  parameters:
+    author: GlideLink
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    description: 'The tutorial module (hw/modules/gain_offset, docs/module_guide.md 5) in a PL chain:
+      RF -> NCO -> Gain and offset -> host port 1. Gain and the DC offset change while it runs;
+      the offset shows as a step of I / Q and a line at 0 Hz. Needs the tutorial image.'
+    generate_options: qt_gui
+    id: glidelink_pl_gain_offset
+    output_language: python
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    title: GlideLink PL gain and offset
+    window_size: (1400,900)
+  states:
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: board
+  id: variable
+  parameters:
+    comment: board with the tutorial image (python glidelink.py build gain_offset nco --name tutorial)
+    value: '"192.168.3.1"'
+  states:
+    coordinate: [200, 8]
+    rotation: 0
+    state: enabled
+- name: args
+  id: variable
+  parameters:
+    comment: ''
+    value: '"driver=glidelink,uri=ip:" + board'
+  states:
+    coordinate: [320, 8]
+    rotation: 0
+    state: enabled
+- name: samp_rate
+  id: variable
+  parameters:
+    comment: ''
+    value: 5e6
+  states:
+    coordinate: [520, 8]
+    rotation: 0
+    state: enabled
+- name: gain
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 0,0,1,1
+    label: PL gain
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '-2'
+    step: '0.01'
+    stop: '1.99'
+    value: '1'
+    widget: counter_slider
+  states:
+    coordinate: [200, 100]
+    rotation: 0
+    state: enabled
+- name: offset_i
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 0,1,1,1
+    label: PL offset I
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '-0.9'
+    step: '0.01'
+    stop: '0.9'
+    value: '0.3'
+    widget: counter_slider
+  states:
+    coordinate: [360, 100]
+    rotation: 0
+    state: enabled
+- name: offset_q
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 1,1,1,1
+    label: PL offset Q
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '-0.9'
+    step: '0.01'
+    stop: '0.9'
+    value: '-0.2'
+    widget: counter_slider
+  states:
+    coordinate: [520, 100]
+    rotation: 0
+    state: enabled
+- name: nco_freq
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 1,0,1,1
+    label: PL NCO shift (Hz)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: -samp_rate / 2
+    step: 10e3
+    stop: samp_rate / 2
+    value: '0'
+    widget: counter_slider
+  states:
+    coordinate: [680, 100]
+    rotation: 0
+    state: enabled
+- name: radio
+  id: glidelink_radio
+  parameters:
+    address: board
+    atten: '89'
+    bandwidth: '0'
+    comment: ''
+    gain: '40'
+    gain_mode: '"manual"'
+    rx_freq: 915e6
+    samp_rate: samp_rate
+    tx_freq: '0'
+  states:
+    coordinate: [16, 260]
+    rotation: 0
+    state: enabled
+- name: nco
+  id: glidelink_nco
+  parameters:
+    args: args
+    comment: ''
+    freq: nco_freq
+    phase: '0'
+    samp_rate: samp_rate
+    slot: '-1'
+  states:
+    coordinate: [260, 260]
+    rotation: 0
+    state: enabled
+- name: gain_offset
+  id: glidelink_gain_offset
+  parameters:
+    args: args
+    comment: generated from hw/modules/gain_offset/module.yaml
+    gain: gain
+    offset_i: offset_i
+    offset_q: offset_q
+    slot: '-1'
+  states:
+    coordinate: [480, 260]
+    rotation: 0
+    state: enabled
+- name: host
+  id: glidelink_host_source
+  parameters:
+    args: args
+    buffer_length: '65536'
+    comment: ''
+    headers: 'True'
+    type: complex
+  states:
+    coordinate: [720, 260]
+    rotation: 0
+    state: enabled
+- name: time
+  id: qtgui_time_sink_x
+  parameters:
+    autoscale: 'False'
+    axislabels: 'True'
+    comment: ''
+    ctrlpanel: 'False'
+    entags: 'False'
+    grid: 'True'
+    gui_hint: 2,0,4,2
+    label1: I
+    label2: Q
+    legend: 'True'
+    name: '"After the PL chain"'
+    nconnections: '1'
+    size: '2000'
+    srate: samp_rate
+    stemplot: 'False'
+    tr_chan: '0'
+    tr_delay: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_slope: qtgui.TRIG_SLOPE_POS
+    tr_tag: '""'
+    type: complex
+    update_time: '0.10'
+    ylabel: Amplitude
+    ymax: '1'
+    ymin: '-1'
+    yunit: '""'
+  states:
+    coordinate: [960, 200]
+    rotation: 0
+    state: enabled
+- name: spectrum
+  id: qtgui_freq_sink_x
+  parameters:
+    average: '0.2'
+    axislabels: 'True'
+    bw: samp_rate
+    comment: ''
+    ctrlpanel: 'False'
+    fc: '0'
+    fftsize: '2048'
+    grid: 'True'
+    gui_hint: 6,0,4,2
+    label: Relative Gain
+    legend: 'False'
+    name: '"Spectrum"'
+    nconnections: '1'
+    norm_window: 'False'
+    showports: 'False'
+    tr_chan: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_tag: '""'
+    type: complex
+    units: dB
+    update_time: '0.10'
+    wintype: window.WIN_BLACKMAN_hARRIS
+    ymax: '0'
+    ymin: '-120'
+  states:
+    coordinate: [960, 340]
+    rotation: 0
+    state: enabled
+
+connections:
+- [radio, '0', nco, '0']
+- [nco, '0', gain_offset, '0']
+- [gain_offset, '0', host, '0']
+- [host, '0', time, '0']
+- [host, '0', spectrum, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.12.0

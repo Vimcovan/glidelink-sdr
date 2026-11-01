@@ -1,0 +1,6 @@
+# written by glidelink.py build gain_offset nco
+name: tutorial
+slots:
+- {module: passthrough}
+- {module: gain_offset}
+- {module: nco}
