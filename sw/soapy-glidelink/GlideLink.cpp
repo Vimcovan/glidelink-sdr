@@ -52,7 +52,8 @@ const size_t DEFAULT_BUFFER_LENGTH = 65536;    // samples per IIO buffer; 4 queu
 const double MAX_SAMPLE_RATE = 50e6;
 const unsigned DEFAULT_TIMEOUT_MS = 1000;
 // for driver operations that can take over a second (re-initialisation about
-// 1 s, a sample rate change up to 1.4 s with the FIR reloaded): over the
+// 1 s, a sample rate change up to 1.4 s with the FIR reloaded, an RF bandwidth
+// change after a sample rate change about 1.3 s, filter calibration): over the
 // network, an expired timeout drops the connection to iiod
 const unsigned SLOW_TIMEOUT_MS = 10000;
 const double TX_ATTEN_MAX = 89.75;             // dB, TX gain = 89.75 + hardwaregain
@@ -328,7 +329,8 @@ public:
 
 	void setBandwidth(const int dir, const size_t ch, const double bw) override
 	{
-		writeLongLong(phyChan(dir, ch), "rf_bandwidth", llround(bw));
+		// the driver recalibrates the analog filter: about 1.3 s after a sample rate change
+		slow([&] { writeLongLong(phyChan(dir, ch), "rf_bandwidth", llround(bw)); });
 	}
 
 	double getBandwidth(const int dir, const size_t ch) const override

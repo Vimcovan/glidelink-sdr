@@ -324,8 +324,10 @@ def cmd_test(a):
             errs = [l.strip() for l in out.splitlines() if "ERROR" in l][:5]
             results.append((label, ok, "; ".join([info, rb] + errs) if info else out.strip()[-800:]))
         else:
-            # output not one to one with the input (e.g. FFT): more input after the stimulus pushes
-            # out what the module still holds; all the stimulus's output must come, as the model says
+            # output not one to one with the input (e.g. FFT): a block-based module may hold a block
+            # back while the next one is incomplete (the Xilinx FFT core stalls as a whole while its
+            # input is starved mid-frame), so more input follows the stimulus; all the stimulus's
+            # output must come, as the model says
             pad, padlast = stimulus(rng, 3000, scale)
             with open(os.path.join(vec, "in.hex"), "a", newline="\n") as f:
                 f.write("".join(f"{int(w):08X} {l}\n" for w, l in zip(pad, padlast)))

@@ -157,7 +157,7 @@ class Model(module_desc.RegisterModel):
 | 命令 | 做什么 |
 |---|---|
 | `new <id> [--name 名字]` | 建 `hw/modules/<id>/`：`module.yaml`（寄存器 CONTROL.enable / soft_reset，ID 值自动选一个不重复的）、`glidelink_<id>.v`（一级流水的直通，端口表按 yaml 生成）、`model.py`（直通的 `Model`）。不改任何东西就能通过 `test`、能构建 |
-| `test <id> [--case K]` | 对 `module.yaml` 中 `tests` 的每一项（块参数，或寄存器名加原始值）：按与 GNU Radio 块相同的"参数 → 寄存器"换算写寄存器，送 6000 个随机 sc16 样点（满幅噪声、单音、小信号、极值，随机长度的包），测试平台随机插入间隙与反压，输出与 `Model` 逐拍比较（`tlast`、`tuser` 随样点），最后读回全部可读寄存器与 `Model.read` 比较。输出个数与输入不同的模块（如 FFT）在输入后补一段把模块里留着的数据推出来，比较全部应出的输出，模型不逐比特时允许 `tolerance` LSB；`test_input_scale` 缩小激励幅度。没有参考模型时只检查能仿真、有输出。向量在 `hw/modules/<id>/build/test<K>/`。需要 Windows 上的 Vivado（xsim） |
+| `test <id> [--case K]` | 对 `module.yaml` 中 `tests` 的每一项（块参数，或寄存器名加原始值）：按与 GNU Radio 块相同的"参数 → 寄存器"换算写寄存器，送 6000 个随机 sc16 样点（满幅噪声、单音、小信号、极值，随机长度的包），测试平台随机插入间隙与反压，输出与 `Model` 逐拍比较（`tlast`、`tuser` 随样点），最后读回全部可读寄存器与 `Model.read` 比较。输出个数与输入不同的模块（如 FFT）在激励后再送一段输入：按块处理的模块在下一块没凑满时可能扣住上一块（Xilinx FFT 核在一帧中途断供时整体停住），然后比较激励应出的全部输出，模型不逐比特时允许 `tolerance` LSB；`test_input_scale` 缩小激励幅度。没有参考模型时只检查能仿真、有输出。向量在 `hw/modules/<id>/build/test<K>/`。需要 Windows 上的 Vivado（xsim） |
 | `build <镜像>` 或 `build <id> ... --name <镜像>` | 镜像文件 `hw/images/<镜像>.yaml`，或直接列模块（放在槽位 1、2……，槽位 0 是外壳的直通，写成 `hw/images/<镜像>.yaml` 留着下次用）；跑 Vivado（约一小时，打印各阶段），产物与时序余量：`hw/build/<镜像>/glidelink_<镜像>.bit`、`.hwh`、`image.json` |
 | `deploy <板子> [<镜像>]` | 不写镜像时用最近构建的。拷到板子开机镜像所在目录（设备树叠加与外壳无关，沿用板上现有的），改 `/etc/default/glidelink-bridge`，重启，等桥接服务把镜像加载好，逐个槽位读 ID 与 `image.json` 核对。`--no-reboot` 只设开机镜像 |
 | `status <板子>` | 开机镜像与各槽位的模块（按 ID 认出 `hw/modules` 中的模块） |

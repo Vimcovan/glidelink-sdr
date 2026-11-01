@@ -27,7 +27,9 @@ function: >-
   and insertion after it, output order (normal = 0 Hz in the centre, reverse, natural,
   bit-reversed), complex output, magnitude or magnitude squared / 32768. Output packets of
   2^LENGTH_LOG2 samples plus the first cyclic prefix insertion entry; KEEP passes one in
-  every KEEP of them. CONTROL.enable = 0 passes the samples unchanged.
+  every KEEP of them. CONTROL.enable = 0 passes the samples unchanged. An FFT comes out once the
+  input stops at an FFT boundary or the next FFT's input is complete: the Xilinx core (pipelined
+  streaming) stalls as a whole while its input is starved in the middle of a frame.
 registers:
   - {name: ID, offset: 0x000, access: ro}
   - {name: VERSION, offset: 0x004, access: ro}
@@ -109,7 +111,7 @@ block:
   start: {CONTROL: 1}
 exact: false                  # the model is floating point (the Xilinx FFT core): about 1 LSB
 tolerance: 4                  # LSB, python glidelink.py test (tb/run_sims.ps1 has the detailed cases)
-test_input_scale: 0.5         # full-scale complex noise overflows the scaled FFT stages (not modelled)
+test_input_scale: 0.5         # full-scale complex noise overflows the scaled stages (OVERFLOW = 1 in xsim; not modelled)
 tests:
   - {size: 1024}
   - {size: 256, order: natural, output: magnitude, keep: 3, cp_rem: [16]}

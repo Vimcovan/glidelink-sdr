@@ -6,7 +6,7 @@
 //   <dir>/in.hex    input beats, "word last" per line
 //   <dir>/out.hex   expected output beats, same format
 //   <dir>/reads.hex optional: "addr value" per line, registers read back and compared after
-//                   the output (compare mode)
+//                   the output (both modes)
 // The input is sent with random gaps, the output taken with random back-pressure.
 // Each input packet carries tuser = {8'hC3 ^ p[7:0], 64'(p)} on its first beat
 // (p = packet number); the output must keep it on the first beat of the same packet,
@@ -140,6 +140,30 @@ module tb_module;
     end
   end
 
+  // registers read back after the output and compared (reads.hex, optional)
+  integer rfd, ra, rv, nreads = 0;
+  reg [31:0] rd;
+  task check_reads;
+    begin
+      rfd = $fopen({`VEC, "/reads.hex"}, "r");
+      if (rfd != 0) begin
+        while (!$feof(rfd)) begin
+          r = $fscanf(rfd, "%h %h\n", ra, rv);
+          if (r == 2) begin
+            axil_read(ra[11:0], rd);
+            nreads = nreads + 1;
+            if (rd !== rv[31:0]) begin
+              $display("ERROR: register 0x%03h read %h, want %h", ra[11:0], rd, rv[31:0]);
+              errors = errors + 1;
+            end
+          end
+        end
+        $fclose(rfd);
+        $display("%0d registers read back", nreads);
+      end
+    end
+  endtask
+
 `ifdef CAPTURE
   // output: random back-pressure, record
   integer cap_fd, quiet = 0;
@@ -164,7 +188,8 @@ module tb_module;
 `endif
       $fclose(cap_fd);
       $display("%0d beats in %0d packets captured", got, pkt_out);
-      $display("PASS (captured; check with the module's script)");
+      check_reads;
+      if (errors == 0) $display("PASS (captured; check with the module's script)"); else $display("FAIL");
       $finish;
     end
   end
@@ -207,29 +232,12 @@ module tb_module;
   end
 
 `ifndef CAPTURE
-  integer rfd, ra, rv, nreads = 0;
-  reg [31:0] rd;
   always @(posedge clk)
     if (rstn && got == n_out && n_out > 0) begin
       repeat (50) @(posedge clk);
       if (got != n_out) errors = errors + 1;
       $display("%0d beats in %0d packets compared, %0d errors", got, pkt_out, errors);
-      rfd = $fopen({`VEC, "/reads.hex"}, "r");
-      if (rfd != 0) begin
-        while (!$feof(rfd)) begin
-          r = $fscanf(rfd, "%h %h\n", ra, rv);
-          if (r == 2) begin
-            axil_read(ra[11:0], rd);
-            nreads = nreads + 1;
-            if (rd !== rv[31:0]) begin
-              $display("ERROR: register 0x%03h read %h, want %h", ra[11:0], rd, rv[31:0]);
-              errors = errors + 1;
-            end
-          end
-        end
-        $fclose(rfd);
-        $display("%0d registers read back", nreads);
-      end
+      check_reads;
       if (errors == 0) $display("PASS"); else $display("FAIL");
       $finish;
     end
