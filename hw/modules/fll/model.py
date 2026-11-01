@@ -12,11 +12,15 @@ Per sample (phase / frequency: 2^32 per cycle; tables as the NCO module):
     y  = x exp(j 2 pi phase / 2^32)      4096-point table, (+2^14) >> 15, saturated
     P, Q over the last TAPS outputs y (coefficients c, s: signed 16 bit, COEF_DATA 2k = c_k,
          2k + 1 = s_k), each part >> (TAP_SHIFT - 1) and saturated to 18 bits
-    e  = Pq Qi - Pi Qq
-    f' = f - ((e BETA) >> 24),  phase += f' - ((e ALPHA) >> 24),  f = min(max(f', -FREQ_MAX), FREQ_MAX)
+    e  = Pq Qi - Pi Qq,  eq = e >> 12      (37 bits -> 25: the loop does not need the 12 LSBs,
+                                            dropping them moves the frequency by < 50 Hz against
+                                            ~500 Hz of loop jitter at 10 MSPS)
+    f' = f - ((eq BETA) >> BETA_SHIFT),  phase += f' - ((eq ALPHA) >> ALPHA_SHIFT),
+    f = min(max(f', -FREQ_MAX), FREQ_MAX)
 
 which is GNU Radio's freq += beta err; phase += freq + alpha err with err = -e / 2^30 (y at full
-scale 1.0, coefficients x 2^TAP_SHIFT) when ALPHA = 2 alpha / pi 2^24 and BETA = 2 beta / pi 2^24.
+scale 1.0, coefficients x 2^TAP_SHIFT) when ALPHA = 2 alpha / pi 2^(ALPHA_SHIFT + 12) (17 bits:
+the gain fits a DSP's 18-bit port, eq its 27-bit one) and the same for BETA.
 Disabled: samples pass unchanged, the loop holds. Output: y.
 
 design(sps, rolloff, filter_size) gives the coefficients and TAP_SHIFT; loop_gains(w) ALPHA, BETA
@@ -60,12 +64,21 @@ def design(sps, rolloff, filter_size):
     return words, ts
 
 
+def mantissa(g):
+    """(G, shift) with g ~ G / 2^(shift + 12), G within 17 bits, as precise as that allows"""
+    sh = 31
+    while sh > 0 and round(g * 2 ** (sh + 12)) >= 1 << 17:
+        sh -= 1
+    return round(g * 2 ** (sh + 12)), sh
+
+
 def loop_gains(w):
-    """(ALPHA, BETA) for loop bandwidth w, as GNU Radio's control_loop (damping sqrt(2) / 2)"""
+    """(ALPHA, ALPHA_SHIFT, BETA, BETA_SHIFT) for loop bandwidth w, as GNU Radio's control_loop
+    (damping sqrt(2) / 2)"""
     z = math.sqrt(2) / 2
     d = 1 + 2 * z * w + w * w
     alpha, beta = 4 * z * w / d, 4 * w * w / d
-    return round(2 * alpha / math.pi * 2 ** 24), round(2 * beta / math.pi * 2 ** 24)
+    return mantissa(2 * alpha / math.pi) + mantissa(2 * beta / math.pi)
 
 
 def freq_max(sps):
@@ -135,6 +148,7 @@ class Model(module_desc.RegisterModel):
         C, S = self.tab
         sh = self.regs["TAP_SHIFT"] - 1
         alpha, beta, fmax = self.regs["ALPHA"], self.regs["BETA"], self.regs["FREQ_MAX"]
+        ash, bsh = self.regs["ALPHA_SHIFT"], self.regs["BETA_SHIFT"]
         c, s, hi, hq = self.c, self.s, self.hi, self.hq
         phase, f = self.phase, self.f
         oi = np.empty(len(words), np.int64)
@@ -150,9 +164,9 @@ class Model(module_desc.RegisterModel):
             qi = sum(a * b for a, b in zip(s, hi)) >> sh
             qq = sum(a * b for a, b in zip(s, hq)) >> sh
             pi, pq, qi, qq = sat(pi, 18), sat(pq, 18), sat(qi, 18), sat(qq, 18)
-            e = pq * qi - pi * qq
-            f2 = f - ((e * beta) >> 24)
-            phase = (phase + f2 - ((e * alpha) >> 24)) & M32
+            eq = (pq * qi - pi * qq) >> 12
+            f2 = f - ((eq * beta) >> bsh)
+            phase = (phase + f2 - ((eq * alpha) >> ash)) & M32
             f = -fmax if f2 < -fmax else fmax if f2 > fmax else f2
             oi[n], oq[n] = yi, yq
         self.phase, self.f = phase, f

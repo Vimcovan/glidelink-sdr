@@ -9,20 +9,21 @@ version: 1.0.0
 data:
   input: sc16, 1 sample per symbol (QPSK)
   output: sc16
-  tuser: passed with its sample
 function: >-
   As GNU Radio's costas_loop_cc of order 4, in fixed point, one sample at a time: y = x
   exp(-j phase) (4096-point table), error sign(yI) yQ - sign(yQ) yI within +-1.0, second-order
-  loop (ALPHA, BETA), frequency within +-FREQ_MAX (model.py). Up to 33 MSPS at 200 MHz
-  (6 clock cycles per sample).
+  loop (ALPHA, BETA), frequency within +-FREQ_MAX (model.py). Up to 28 MSPS at 200 MHz
+  (7 clock cycles per sample, 2 DSP slices).
 registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
   - name: CONTROL
     fields:
       - {name: enable, bits: 0, doc: "1 = Costas loop, 0 = pass unchanged"}
       - {name: soft_reset, bits: 1, access: pulse, doc: "phase 0, frequency = FREQ as written"}
   - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
-  - {name: ALPHA, width: 27, doc: "phase gain, alpha 2^33 / (2 pi)"}
-  - {name: BETA, width: 27, doc: "frequency gain, beta 2^33 / (2 pi)"}
+  - {name: ALPHA, width: 17, doc: "phase gain mantissa: alpha 2^17 / (2 pi) = ALPHA / 2^ALPHA_SHIFT"}
+  - {name: ALPHA_SHIFT, width: 5}
+  - {name: BETA, width: 17, doc: "frequency gain mantissa: beta 2^17 / (2 pi) = BETA / 2^BETA_SHIFT"}
+  - {name: BETA_SHIFT, width: 5}
   - {name: FREQ_MAX, width: 32, default: 683565275, doc: "frequency limit, 2^32 per cycle per sample (1 rad)"}
   - {name: FREQ, strobe: true, readback: true, doc: "write: frequency now (and after a reset); read: frequency now (signed)"}
   - {name: PHASE, access: ro, doc: "phase now, 2^32 per cycle"}
@@ -31,7 +32,8 @@ block:                        # the GNU Radio blocks (PL and software), same par
     Costas loop for QPSK, as GNU Radio's Costas Loop of order 4 (costas_loop_cc), in fixed point.
   params:
     - {name: w, label: Loop bandwidth, type: real, default: 0.0314, check: "0 < w < 1",
-       write: {ALPHA: "model.loop_gains(w)[0]", BETA: "model.loop_gains(w)[1]"},
+       write: {ALPHA: "model.loop_gains(w)[0]", ALPHA_SHIFT: "model.loop_gains(w)[1]",
+               BETA: "model.loop_gains(w)[2]", BETA_SHIFT: "model.loop_gains(w)[3]"},
        doc: "rad per sample, as GNU Radio (6.28 / 200)"}
   start: {CONTROL: 1}
 tests:                        # python glidelink.py test costas: block parameters per case

@@ -1,14 +1,15 @@
 # QPSK over the air with the receiver in the PL (sw/gr-glidelink/examples/ota_qpsk_pl.grc), the same
-# image on both boards: on the TX board the FIR in slot 1 interpolates the symbols by 4 with an RRC
-# pulse; on the RX board slot 1 low-passes and decimates by 2, then AGC, FLL, the matched filter
-# (FIR in slot 4), symbol sync and Costas loop, so the PC gets one sample per symbol.
+# image on both boards: on the TX board rrc_interp turns the symbols into 4 samples per symbol with
+# an RRC pulse; on the RX board lp_decim low-passes and decimates by 2, then AGC, FLL, the matched
+# filter (rrc_mf), symbol sync and Costas loop, so the PC gets one sample per symbol. The three
+# FIRs are the Xilinx FIR Compiler with coefficients fixed in the image.
 name: qpsk
 slots:
   - {module: passthrough}         # slot 0
-  - {module: fir, params: {TAPS: 64}}
-  - {module: agc}                 # slot 2
-  - {module: fll}                 # slot 3
-  - {module: fir, params: {TAPS: 64}}
-  - {module: symsync}             # slot 5
-  - {module: costas}              # slot 6
-  - {module: nco}                 # slot 7
+  - {module: rrc_interp}          # slot 1: TX
+  - {module: lp_decim}            # slot 2: RX from here on
+  - {module: agc}                 # slot 3
+  - {module: fll}                 # slot 4
+  - {module: rrc_mf}              # slot 5
+  - {module: symsync}             # slot 6
+  - {module: costas}              # slot 7

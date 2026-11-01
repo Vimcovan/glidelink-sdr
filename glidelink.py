@@ -84,7 +84,8 @@ version: 1.0.0
 data:
   input: sc16                 # {{Q[31:16], I[15:0]}}
   output: sc16
-  tuser: passed with its sample
+# rate: {{interp: 4}}           # outputs per input when not 1 : 1 ({{decim: 2}}, or variable); the
+#                             # platform makes the packets (tuser, tlast) from it
 function: >-
   Passes the samples through (template: replace with what the module does).
 registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
@@ -109,7 +110,8 @@ RTL_TEMPLATE = """\
 // reference model: model.py (docs/module_guide.md).
 //
 // Template: one pipeline stage; with CONTROL.enable the samples pass through
-// unchanged too. Replace the marked line by the processing.
+// unchanged too. Replace the marked line by the processing. Samples only: the
+// packets around them are the platform's (module.yaml rate:).
 // ***************************************************************************
 
 `timescale 1ns/100ps
@@ -120,15 +122,11 @@ module glidelink_{id} (
   // one stage: the output register takes a sample when it is empty or being read
   reg         v = 1'b0;
   reg  [31:0] data = 32'd0;
-  reg  [71:0] user = 72'd0;
-  reg         last = 1'b0;
   wire        ce = !v || m_axis_tready;
 
   assign s_axis_tready = ce;
   assign m_axis_tvalid = v;
   assign m_axis_tdata = data;
-  assign m_axis_tuser = user;
-  assign m_axis_tlast = last;
 
   always @(posedge clk) begin
     if (!rstn || flush || soft_reset)
@@ -137,8 +135,6 @@ module glidelink_{id} (
       v <= s_axis_tvalid;
     if (ce) begin
       data <= enable ? s_axis_tdata : s_axis_tdata;     // <- the processing
-      user <= s_axis_tuser;
-      last <= s_axis_tlast;
     end
   end
 
@@ -240,10 +236,15 @@ def stimulus(rng, n=6000, scale=1.0):
     return pack(i, q), last
 
 
-def run_sim(mod_dir, vec, capture=False):
+def run_sim(mod_dir, vec, capture=False, tuser=True, mid=None):
+    """tuser: check the output packets' headers (the platform's packets; not for modules that
+    make their own, framing: module or bus: module); mid: (beats, packets) before a flush in the
+    middle of the stream (tb_module.v MID_FLUSH)"""
     cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SIM, mod_dir, "-Vectors", vec]
+    if mid:
+        cmd += ["-MidFlush", str(mid[0]), "-MidFlushPkts", str(mid[1])]
     if capture:
-        cmd += ["-Capture", "-NoTuser", "-InFlags", "0"]
+        cmd += ["-Capture", "-InFlags", "0"] + ([] if tuser else ["-NoTuser"])
     r = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     return r.stdout + r.stderr
 
@@ -260,10 +261,16 @@ def cmd_test(a):
     if a.case is not None:
         cases = [cases[a.case]]
     exact = desc.get("exact", True)
+    platform_packets = desc.get("bus", "generated") != "module" and desc.get("framing", "platform") != "module"
     tol = int(desc.get("tolerance", 0 if exact else 4))
     results = []
-    for k, case in enumerate(cases):
-        k = a.case if a.case is not None else k
+    # every case, then a flush in the middle of a stream (the module backed up, as on a board
+    # when a stream starts while it is still busy): from there on the output must be the model's
+    # from its state after the register writes, nothing stuck and nothing left from before
+    entries = [(a.case if a.case is not None else i, c, False) for i, c in enumerate(cases)]
+    if m is not None and a.case is None:
+        entries.append((len(cases), cases[0], True))
+    for k, case, mid in entries:
         vec = os.path.join(desc["dir"], "build", f"test{k}")
         os.makedirs(vec, exist_ok=True)
         for f in ("out.hex", "reads.hex", "captured.hex"):
@@ -272,6 +279,10 @@ def cmd_test(a):
         rng = np.random.default_rng(1000 + k)
         scale = float(desc.get("test_input_scale", 1.0))
         words, last = stimulus(rng, scale=scale)
+        n_a = 0                             # mid-stream flush: beats (whole packets) before it
+        if mid:
+            n_a = next(i + 1 for i in range(1500, len(last)) if last[i])
+            mid = (n_a, int(last[:n_a].sum()))
         writes = []
         model = m.Model() if m else None
 
@@ -297,17 +308,19 @@ def cmd_test(a):
         with open(os.path.join(vec, "in.hex"), "w", newline="\n") as f:
             f.write("".join(f"{int(w):08X} {l}\n" for w, l in zip(words, last)))
         label = ", ".join(f"{n}={v}" for n, v in case.items()) or "defaults"
+        if mid:
+            label = f"flush mid-stream after {n_a} beats, then {label}"
         if model is None:
-            out = run_sim(desc["dir"], vec, capture=True)
+            out = run_sim(desc["dir"], vec, capture=True, tuser=platform_packets)
             n = sum(1 for _ in open(os.path.join(vec, "captured.hex"))) if os.path.exists(os.path.join(vec, "captured.hex")) else 0
             ok = "PASS" in out and n > 0
             results.append((label, ok, f"no reference model: {n} samples out, not checked"))
             continue
         before = copy.deepcopy(model)
-        exp = model.process(words)
-        if len(exp) == len(words) and exact:
+        exp = model.process(words[n_a:])    # the flush leaves the model as after the writes
+        if len(exp) == len(words) - n_a and exact and not mid:
             with open(os.path.join(vec, "out.hex"), "w", newline="\n") as f:
-                f.write("".join(f"{int(w):08X} {l}\n" for w, l in zip(exp, last)))
+                f.write("".join(f"{int(w):08X} {l}\n" for w, l in zip(exp, last[n_a:])))
             reads = []
             for r in desc["regs"]:
                 if r["access"] == "wo" or r.get("test_read") is False:
@@ -317,7 +330,7 @@ def cmd_test(a):
                 reads.append((r["offset"], model.read(r["name"])))
             with open(os.path.join(vec, "reads.hex"), "w", newline="\n") as f:
                 f.write("".join(f"{o:03X} {v & 0xFFFFFFFF:08X}\n" for o, v in reads))
-            out = run_sim(desc["dir"], vec)
+            out = run_sim(desc["dir"], vec, mid=mid)
             ok = "PASS" in out and "FAIL" not in out
             info = next((l.strip() for l in out.splitlines() if "compared" in l), "")
             rb = next((l.strip() for l in out.splitlines() if "read back" in l), "")
@@ -332,16 +345,43 @@ def cmd_test(a):
             with open(os.path.join(vec, "in.hex"), "a", newline="\n") as f:
                 f.write("".join(f"{int(w):08X} {l}\n" for w, l in zip(pad, padlast)))
             need = len(exp)
-            exp = before.process(np.concatenate([words, pad]))
-            out = run_sim(desc["dir"], vec, capture=True)
+            out = run_sim(desc["dir"], vec, capture=True, tuser=platform_packets, mid=mid)
             cap = os.path.join(vec, "captured.hex")
             got = np.array([int(l.split()[0], 16) for l in open(cap)], np.uint32) if os.path.exists(cap) else np.zeros(0, np.uint32)
-            n = min(len(got), len(exp))
-            gi, gq = (got[:n] & 0xFFFF).astype(np.uint16).view(np.int16), (got[:n] >> 16).astype(np.uint16).view(np.int16)
-            ei, eq = (exp[:n] & 0xFFFF).astype(np.uint16).view(np.int16), (exp[:n] >> 16).astype(np.uint16).view(np.int16)
-            err = int(max(np.abs(gi.astype(int) - ei).max(initial=0), np.abs(gq.astype(int) - eq).max(initial=0)))
-            ok = "PASS" in out and need <= len(got) <= len(exp) and err <= tol
-            results.append((label, ok, f"{len(got)} samples out ({need} needed), largest difference {err} LSB (allowed {tol})"))
+
+            def compare(skip_in, shift):
+                """(largest difference after the start-up stretch, its length, outputs expected): the
+                output against the model's for the input from beat n_a + skip_in on, shifted"""
+                e = copy.deepcopy(before).process(np.concatenate([words[n_a + skip_in:], pad]))
+                g = got[shift:] if shift >= 0 else np.concatenate([np.zeros(-shift, np.uint32), got])
+                n = min(len(g), len(e))
+                gi, gq = (g[:n] & 0xFFFF).astype(np.uint16).view(np.int16), (g[:n] >> 16).astype(np.uint16).view(np.int16)
+                ei, eq = (e[:n] & 0xFFFF).astype(np.uint16).view(np.int16), (e[:n] >> 16).astype(np.uint16).view(np.int16)
+                d = np.maximum(np.abs(gi.astype(int) - ei), np.abs(gq.astype(int) - eq))
+                i0 = 0
+                if mid:
+                    bad = np.nonzero(d > tol)[0]
+                    i0 = int(bad[-1]) + 1 if len(bad) else 0
+                return int(d[i0:].max(initial=0)), i0, len(e)
+
+            # after a mid-stream flush the module may go on from what it still held: a FIR's delay
+            # line, a decimator's phase (an incomplete group of inputs finished by the first new
+            # one). So the model may start a few inputs later and the output be a sample or two off;
+            # past a start-up stretch it must then be the model's. Anything left over from before
+            # the flush would shift all of it.
+            tries = [(0, 0)] + ([(p, sh) for p in range(8) for sh in (0, 1, -1, 2, -2) if (p, sh) != (0, 0)] if mid else [])
+            for skip_in, shift in tries:
+                err, i0, n_exp = compare(skip_in, shift)
+                if err <= tol and i0 <= need // 2:
+                    break
+            ok = ("PASS" in out and need - 2 <= len(got) <= n_exp + 2 and err <= tol and i0 <= need // 2
+                  and (mid or need <= len(got) <= n_exp))
+            note = ""
+            if mid and (skip_in or shift):
+                note += f", aligned {skip_in} input(s) later, output shifted by {shift}"
+            if i0:
+                note += f", the first {i0} differ (start-up after the flush)"
+            results.append((label, ok, f"{len(got)} samples out ({need} needed), largest difference {err} LSB (allowed {tol}){note}"))
     print(f"{desc['id']}: {len(results)} case(s)")
     for label, ok, info in results:
         print(f"  {'PASS' if ok else 'FAIL'}  {label}: {info}")

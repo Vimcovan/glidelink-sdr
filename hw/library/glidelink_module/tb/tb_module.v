@@ -1,5 +1,6 @@
 // Generic testbench for GlideLink user modules (docs/phase3_modules.md):
-// bit-exact comparison against vectors from the module's reference model.
+// bit-exact comparison against vectors from the module's reference model. After the
+// register writes the module gets a one-cycle flush, as on a board at a stream start.
 //
 //   tb_cfg.vh (written by run_module_sim.ps1) defines DUT (the module) and VEC (vector dir)
 //   <dir>/regs.hex  register writes, "addr data" per line, done before streaming
@@ -13,6 +14,14 @@
 // (IN_FLAGS, if defined, replaces the flags 8'hC3 ^ p, e.g. 0 for modules that act on
 // flag bit 1 = end of burst), unless NO_TUSER_CHECK is defined (modules whose output packets do not map one to
 // one onto input packets, e.g. jscc_enc: an image in, a symbol frame out).
+// In capture mode the output packets must start with input packets' headers in
+// order (some may be skipped: packets of the platform's framer around a module
+// whose output is not one per input).
+// MID_FLUSH n (with MID_FLUSH_PKTS, the packets in those n beats): a flush in the middle
+// of a stream, as on a board when a stream starts while the module is still busy: the first
+// n beats are sent with the output stalled until the input backs up (or all are in), then
+// the module gets a flush, the rest of the n beats is skipped and what was out so far is
+// forgotten; the output from there on is compared (out.hex / captured.hex: from beat n on).
 // Capture mode (CAPTURE defined, for modules checked by a script instead of a
 // vector file, e.g. ofdm_tx): every output beat goes to <dir>/captured.hex as
 // "word last flags" (flags = tuser[71:64] of the packet's first beat), and the
@@ -29,7 +38,7 @@ module tb_module;
   `define CAPTURE_QUIET 200000
 `endif
 
-  reg         clk = 1'b0, rstn = 1'b0;
+  reg         clk = 1'b0, rstn = 1'b0, flush = 1'b0;
   always #2.5 clk = !clk;                   // 200 MHz
 
   reg         awvalid = 1'b0, wvalid = 1'b0, bready = 1'b1, arvalid = 1'b0, rready = 1'b1;
@@ -46,7 +55,7 @@ module tb_module;
   wire [71:0] m_user;
 
   `DUT dut (
-    .clk(clk), .rstn(rstn), .flush(1'b0),
+    .clk(clk), .rstn(rstn), .flush(flush),
     .s_axil_awvalid(awvalid), .s_axil_awready(awready), .s_axil_awaddr(awaddr),
     .s_axil_wvalid(wvalid), .s_axil_wready(wready), .s_axil_wdata(wdata),
     .s_axil_bvalid(bvalid), .s_axil_bready(bready),
@@ -83,6 +92,8 @@ module tb_module;
   reg         in_l [0:MAXN-1], out_l [0:MAXN-1];
   integer     n_in = 0, n_out = 0, fd, r, a, d, l;
   integer     errors = 0, got = 0, sent = 0, pkt_in = 0, pkt_out = 0;
+  reg         stall = 1'b0;                 // MID_FLUSH: the output held back
+  integer     blocked = 0;
   reg         first_in = 1'b1, first_out = 1'b1;
   reg  [31:0] id;
 
@@ -113,10 +124,37 @@ module tb_module;
       if (r == 2) axil_write(a, d);
     end
     $fclose(fd);
+    // as on a board, where the shell flushes the slots on a host port's path when a stream
+    // starts (PORT_RESET): a flush after the register writes, before the samples
+    @(posedge clk) flush <= 1'b1;
+    @(posedge clk) flush <= 1'b0;
+    repeat (20) @(posedge clk);
 
+`ifdef MID_FLUSH
+    stall = 1'b1;
+`endif
     // input: random gaps
     while (sent < n_in) begin
       @(posedge clk);
+`ifdef MID_FLUSH
+      blocked = s_valid && !s_ready ? blocked + 1 : sent >= `MID_FLUSH ? blocked + 1 : 0;
+      if (stall && blocked >= 300) begin    // the module is backed up (or has all of it): flush
+        s_valid <= 1'b0;
+        @(posedge clk) flush <= 1'b1;
+        @(posedge clk) flush <= 1'b0;
+        repeat (20) @(posedge clk);
+        sent = `MID_FLUSH;
+        pkt_in = `MID_FLUSH_PKTS;
+        pkt_out = `MID_FLUSH_PKTS;
+        first_out = 1'b1;
+        got = 0;
+`ifdef CAPTURE
+        restart_capture;
+`endif
+        stall = 1'b0;
+        @(posedge clk);
+      end
+`endif
       if (s_valid && s_ready) begin
         sent = sent + 1;
         if (s_last) pkt_in = pkt_in + 1;
@@ -166,14 +204,39 @@ module tb_module;
 
 `ifdef CAPTURE
   // output: random back-pressure, record
-  integer cap_fd, quiet = 0;
+  integer cap_fd, quiet = 0, cap_pkt = -1;
   reg [7:0] cap_flags = 8'd0;
   initial cap_fd = $fopen({`VEC, "/captured.hex"}, "w");
+  task restart_capture;                     // MID_FLUSH: the output before the flush is not kept
+    begin
+      $fclose(cap_fd);
+      cap_fd = $fopen({`VEC, "/captured.hex"}, "w");
+`ifdef MID_FLUSH
+      cap_pkt = `MID_FLUSH_PKTS - 1;
+`endif
+    end
+  endtask
   always @(posedge clk) begin
-    m_ready <= ($random % 3) != 0;
+    m_ready <= ($random % 3) != 0 && !stall;
     quiet = quiet + 1;
     if (m_valid && m_ready) begin
       if (first_out) cap_flags = m_user[71:64];
+`ifndef NO_TUSER_CHECK
+      // the platform's packets: each output packet starts with the header of an input packet,
+      // in order (an input packet with no output of its own is dropped, so numbers may skip)
+      if (first_out) begin
+`ifdef IN_FLAGS
+        if (m_user[71:64] !== `IN_FLAGS || m_user[63:32] !== 32'd0 ||
+`else
+        if (m_user[71:64] !== (8'hC3 ^ m_user[7:0]) || m_user[63:32] !== 32'd0 ||
+`endif
+            $signed(m_user[31:0]) <= cap_pkt || m_user[31:0] > pkt_in) begin
+          if (errors < 10) $display("ERROR: output packet %0d header %h (after input packet %0d)", pkt_out, m_user, cap_pkt);
+          errors = errors + 1;
+        end
+        cap_pkt = m_user[31:0];
+      end
+`endif
       $fwrite(cap_fd, "%h %0d %h\n", m_data, m_last, cap_flags);
       got = got + 1;
       first_out = m_last;
@@ -196,7 +259,7 @@ module tb_module;
 `else
   // output: random back-pressure, compare
   always @(posedge clk) begin
-    m_ready <= ($random % 3) != 0;
+    m_ready <= ($random % 3) != 0 && !stall;
     if (m_valid && m_ready) begin
       if (got >= n_out) begin
         if (errors < 10) $display("ERROR: extra output %h", m_data);

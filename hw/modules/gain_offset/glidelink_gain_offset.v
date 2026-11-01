@@ -3,8 +3,8 @@
 // module.yaml; reference model: model.py (docs/module_guide.md).
 //
 // I and Q each: sat16(((x * GAIN + 2^13) >>> 14) + OFFSET). Two stages
-// (products; rounding, offset, saturation), stalled together by back-pressure;
-// tuser / tlast travel with the samples. Disabled: samples pass unchanged.
+// (products; rounding, offset, saturation), stalled together by back-pressure.
+// Disabled: samples pass unchanged.
 // ***************************************************************************
 
 `timescale 1ns/100ps
@@ -24,14 +24,10 @@ module glidelink_gain_offset (
   input             s_axis_tvalid,
   output            s_axis_tready,
   input     [31:0]  s_axis_tdata,
-  input     [71:0]  s_axis_tuser,
-  input             s_axis_tlast,
 
   output            m_axis_tvalid,
   input             m_axis_tready,
-  output    [31:0]  m_axis_tdata,
-  output    [71:0]  m_axis_tuser,
-  output            m_axis_tlast
+  output    [31:0]  m_axis_tdata
 );
 
   reg   [1:0] v = 2'd0;
@@ -39,7 +35,7 @@ module glidelink_gain_offset (
 
   assign s_axis_tready = ce;
 
-  reg  [104:0] side [0:1];                  // {last, user, data}
+  reg  [31:0] side = 32'd0;               // the input sample (bypass)
   reg   [1:0] byp = 2'd0;
 
   always @(posedge clk) begin
@@ -48,8 +44,7 @@ module glidelink_gain_offset (
     else if (ce)
       v <= {v[0], s_axis_tvalid};
     if (ce) begin
-      side[0] <= {s_axis_tlast, s_axis_tuser, s_axis_tdata};
-      side[1] <= side[0];
+      side <= s_axis_tdata;
       byp <= {byp[0], !enable};
     end
   end
@@ -79,13 +74,11 @@ module glidelink_gain_offset (
     if (ce) begin
       p_i <= $signed(s_axis_tdata[15:0]) * $signed(gain);
       p_q <= $signed(s_axis_tdata[31:16]) * $signed(gain);
-      out <= byp[0] ? side[0][31:0] : {sat(p_q, offset_q), sat(p_i, offset_i)};
+      out <= byp[0] ? side : {sat(p_q, offset_q), sat(p_i, offset_i)};
     end
   end
 
   assign m_axis_tvalid = v[1];
   assign m_axis_tdata = out;
-  assign m_axis_tuser = side[1][103:32];
-  assign m_axis_tlast = side[1][104];
 
 endmodule

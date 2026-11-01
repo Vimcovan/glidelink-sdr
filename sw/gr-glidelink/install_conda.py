@@ -4,9 +4,11 @@
 
 - python/glidelink/*.py           -> <gnuradio package>/glidelink/
 - hw/modules sc16.py, module_desc.py, and model.py / module.yaml of every module with a
-  block section                   -> <gnuradio package>/glidelink/modules/
+  block section, the Python files of the shared directories they use (uses:)
+                                  -> <gnuradio package>/glidelink/modules/
 - grc/*.yml, and the modules' blocks generated from module.yaml (hw/scripts/gen_module.py)
                                   -> <GNU Radio prefix>/share/gnuradio/grc/blocks/
+  (the generated blocks of modules no longer in hw/modules are removed: glidelink_generated.txt)
 
     D:\\radioconda\\python.exe sw\\gr-glidelink\\install_conda.py
 """
@@ -38,13 +40,27 @@ def main():
     mods = os.path.join(pkg, "modules")
     for f in ("sc16.py", "module_desc.py"):
         copy(os.path.join(HW_MODULES, f), mods)
+    for lib in gen_module.block_libraries():
+        for f in glob.glob(os.path.join(HW_MODULES, lib, "*.py")):
+            copy(f, os.path.join(mods, lib))
+    # the generated block files of the last installation: those of modules gone are removed
+    manifest = os.path.join(blocks, "glidelink_generated.txt")
+    old = set(open(manifest).read().split()) if os.path.exists(manifest) else set()
+    made = set()
     for m in gen_module.block_modules():
         for f in ("model.py", "module.yaml"):
             copy(os.path.join(HW_MODULES, m, f), os.path.join(mods, m))
         for fn, text in gen_module.grc_blocks(gen_module.module_desc.load(m)).items():
             with open(os.path.join(blocks, fn), "w", encoding="utf8", newline="\n") as fh:
                 fh.write(text)
+            made.add(fn)
         print(f"module {m}: blocks glidelink_{m} (PL), glidelink_{m}_model (software)")
+    for fn in sorted(old - made):
+        if os.path.exists(os.path.join(blocks, fn)):
+            os.remove(os.path.join(blocks, fn))
+            print(f"removed {fn} (its module is gone)")
+    with open(manifest, "w", newline="\n") as fh:
+        fh.write("\n".join(sorted(made)) + "\n")
     for f in glob.glob(os.path.join(HERE, "grc", "*.yml")):
         copy(f, blocks)
     print(f"Python package: {pkg}")

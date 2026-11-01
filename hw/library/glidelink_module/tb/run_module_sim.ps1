@@ -15,6 +15,8 @@ param(
   [double]$TimeoutMs = 0,                   # simulated time limit (default 13 ms)
   [switch]$NoTuser,                         # output packets not one to one with input packets
   [int]$InFlags = -1,                       # input packets' tuser flags (default 0xC3 ^ packet number)
+  [int]$MidFlush = 0,                       # flush mid-stream: the first MidFlush beats (MidFlushPkts
+  [int]$MidFlushPkts = 0,                   # packets) go in with the output stalled, then a flush
   [string]$Bin = "D:\AMDDesignTools\2025.2\Vivado\bin"
 )
 $ErrorActionPreference = "Stop"
@@ -43,6 +45,7 @@ print(json.dumps({'top': i['top'], 'rtl': i['rtl'], 'sv': gen_image.sv_compile_o
   if ($Packets -gt 0) { $cfg += "``define CAPTURE_PACKETS $Packets`n" }
   if ($NoTuser) { $cfg += "``define NO_TUSER_CHECK`n" }
   if ($InFlags -ge 0) { $cfg += "``define IN_FLAGS 8'd$InFlags`n" }
+  if ($MidFlush -gt 0) { $cfg += "``define MID_FLUSH $MidFlush`n``define MID_FLUSH_PKTS $MidFlushPkts`n" }
   if ($TimeoutMs -gt 0) { $cfg += "``define TIMEOUT_NS ($($TimeoutMs * 1e6))`n" }
   $cfg | Set-Content -Encoding ascii tb_cfg.vh
   $v = @(Get-ChildItem (Join-Path $here "..\*.v") | ForEach-Object { $_.FullName })

@@ -9,13 +9,11 @@ version: 1.0.0
 data:
   input: sc16, 2 samples per symbol, matched-filtered
   output: sc16, 1 sample per symbol
-  tuser: >-
-    an output carries the tuser of the first packet start and any tlast among the input
-    samples since the previous output
+rate: variable                # one output per symbol; packets: the platform's
 function: >-
   Timing recovery (M. Rice, ch. 8): modulo-1 NCO, piecewise parabolic Farrow interpolator,
   Gardner timing error detector, PI loop filter; one output per symbol (model.py). Up to
-  25 MSPS in at 200 MHz (8 clock cycles per sample).
+  25 MSPS in at 200 MHz (16 clock cycles per symbol of 2 samples, 2 DSP slices).
 registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
   - name: CONTROL
     fields:
@@ -24,8 +22,10 @@ registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; por
   - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
   - {name: W0, width: 25, default: 8388608, doc: "nominal NCO step, 1.0 = 2^24 (0.5: 2 samples per symbol)"}
   - {name: MAX_DEV, width: 24, default: 83886, doc: "W kept within W0 +- MAX_DEV (1 % of 0.5)"}
-  - {name: KP, width: 24, doc: "proportional gain x 2^24 (signed)"}
-  - {name: KI, width: 24, doc: "integral gain x 2^24 (signed)"}
+  - {name: KP, width: 18, doc: "proportional gain mantissa (signed): gain per 2^30 = KP / 2^(KP_SHIFT + 3)"}
+  - {name: KP_SHIFT, width: 5}
+  - {name: KI, width: 18, doc: "integral gain mantissa (signed): gain per 2^30 = KI / 2^(KI_SHIFT + 3)"}
+  - {name: KI_SHIFT, width: 5}
   - {name: W, access: ro, width: 25, doc: "NCO step now"}
 block:                        # the GNU Radio blocks (PL and software), same parameters
   doc: >-
@@ -33,7 +33,8 @@ block:                        # the GNU Radio blocks (PL and software), same par
     interpolator, Gardner detector, PI loop; one output sample per symbol.
   params:
     - {name: loop_bw, label: Loop bandwidth (BnT), type: real, default: 0.01, check: "0 < loop_bw < 0.5",
-       write: {KP: "model.gains(loop_bw, damping, ted_gain)[0]", KI: "model.gains(loop_bw, damping, ted_gain)[1]"},
+       write: {KP: "model.gains(loop_bw, damping, ted_gain)[0]", KP_SHIFT: "model.gains(loop_bw, damping, ted_gain)[1]",
+               KI: "model.gains(loop_bw, damping, ted_gain)[2]", KI_SHIFT: "model.gains(loop_bw, damping, ted_gain)[3]"},
        doc: "noise bandwidth x symbol time"}
     - {name: damping, label: Damping, type: real, default: 0.707, check: "0 < damping"}
     - {name: ted_gain, label: TED gain, type: real, default: 0.3, check: "ted_gain != 0",

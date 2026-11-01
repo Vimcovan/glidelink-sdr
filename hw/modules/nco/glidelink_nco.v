@@ -9,8 +9,8 @@
 // sample, f / fs * 2^32), PHASE (write: phase of the next sample; read:
 // current phase).
 // x[n] * exp(j 2 pi phase / 2^32) through a 4096-point table, products
-// rounded (+2^14, >> 15) and saturated to sc16. tuser / tlast travel with
-// their samples. Pipeline of 5 stages, stalled as a whole by back-pressure.
+// rounded (+2^14, >> 15) and saturated to sc16. Pipeline of 5 stages,
+// stalled as a whole by back-pressure.
 // ***************************************************************************
 
 `timescale 1ns/100ps
@@ -31,14 +31,10 @@ module glidelink_nco (
   input             s_axis_tvalid,
   output            s_axis_tready,
   input     [31:0]  s_axis_tdata,
-  input     [71:0]  s_axis_tuser,
-  input             s_axis_tlast,
 
   output            m_axis_tvalid,
   input             m_axis_tready,
-  output    [31:0]  m_axis_tdata,
-  output    [71:0]  m_axis_tuser,
-  output            m_axis_tlast
+  output    [31:0]  m_axis_tdata
 );
 
   reg  [31:0] ph = 32'd0;                   // the phase of the next sample
@@ -56,8 +52,8 @@ module glidelink_nco (
 
   assign s_axis_tready = ce;
 
-  // the sideband (tuser, tlast, bypass, input sample) travels in a shift register
-  reg  [104:0] side [0:4];                  // {last, user, data}
+  // the input sample (for the bypass) travels in a shift register
+  reg  [31:0] side [0:3];
   reg   [4:0] byp = 5'd0;
   reg  [11:0] k0 = 12'd0;
 
@@ -76,13 +72,13 @@ module glidelink_nco (
       v <= {v[3:0], s_axis_tvalid};
     end
     if (ce) begin
-      side[0] <= {s_axis_tlast, s_axis_tuser, s_axis_tdata};
+      side[0] <= s_axis_tdata;
       byp[0] <= !enable;
       k0 <= ph[31:20];
-      for (j = 1; j < 5; j = j + 1) begin
-        side[j] <= side[j - 1];
+      for (j = 1; j < 5; j = j + 1)
         byp[j] <= byp[j - 1];
-      end
+      for (j = 1; j < 4; j = j + 1)
+        side[j] <= side[j - 1];
     end
   end
 
@@ -124,7 +120,5 @@ module glidelink_nco (
 
   assign m_axis_tvalid = v[4];
   assign m_axis_tdata = out4;
-  assign m_axis_tuser = side[4][103:32];
-  assign m_axis_tlast = side[4][104];
 
 endmodule

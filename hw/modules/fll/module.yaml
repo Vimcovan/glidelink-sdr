@@ -11,12 +11,12 @@ parameters:
 data:
   input: sc16                 # {Q[31:16], I[15:0]}
   output: sc16
-  tuser: passed with its sample
 function: >-
   As GNU Radio's fll_band_edge_cc, in fixed point, one sample at a time (model.py): the input
   turned by the loop's NCO, band-edge filters P +- jQ over the outputs, error -4 Im(P conj Q),
-  second-order loop (ALPHA, BETA), frequency within +-FREQ_MAX. Up to 14 MSPS at 200 MHz
-  (14 clock cycles per sample).
+  second-order loop (ALPHA, BETA), frequency within +-FREQ_MAX. Up to 12.5 MSPS at 200 MHz
+  (16 clock cycles per sample: the 47 older taps on 3 shared multiply-accumulate lanes while the
+  newest sample is turned; 16 DSP slices).
 registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
   - name: CONTROL
     fields:
@@ -26,8 +26,10 @@ registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; por
   - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
   - {name: TAPS, access: ro, value: TAPS, doc: "filter length at most"}
   - {name: TAP_SHIFT, width: 5, default: 16, doc: "coefficients are x 2^TAP_SHIFT"}
-  - {name: ALPHA, width: 24, doc: "phase gain, 2 alpha / pi 2^24"}
-  - {name: BETA, width: 24, doc: "frequency gain, 2 beta / pi 2^24"}
+  - {name: ALPHA, width: 17, doc: "phase gain mantissa: 2 alpha / pi = ALPHA / 2^(ALPHA_SHIFT + 12)"}
+  - {name: ALPHA_SHIFT, width: 5}
+  - {name: BETA, width: 17, doc: "frequency gain mantissa: 2 beta / pi = BETA / 2^(BETA_SHIFT + 12)"}
+  - {name: BETA_SHIFT, width: 5}
   - {name: FREQ_MAX, width: 32, default: 683565275, doc: "frequency limit, 2^32 per cycle per sample"}
   - {name: FREQ, strobe: true, readback: true, doc: "write: frequency now (and after a reset); read: frequency now (signed)"}
   - {name: PHASE, access: ro, doc: "NCO phase now, 2^32 per cycle"}
@@ -46,7 +48,9 @@ block:                        # the GNU Radio blocks (PL and software), same par
     - {name: rolloff, label: Filter rolloff, type: real, default: 0.35, check: "0 < rolloff <= 1"}
     - {name: filter_size, label: Prototype filter size, type: int, default: 44, check: "2 <= filter_size <= read('TAPS')"}
     - {name: w, label: Loop bandwidth, type: real, default: 0.0157, check: "0 < w < 1",
-       write: {ALPHA: "model.loop_gains(w)[0]", BETA: "model.loop_gains(w)[1]"}, doc: "rad per sample, as GNU Radio (6.28 / 400)"}
+       write: {ALPHA: "model.loop_gains(w)[0]", ALPHA_SHIFT: "model.loop_gains(w)[1]",
+               BETA: "model.loop_gains(w)[2]", BETA_SHIFT: "model.loop_gains(w)[3]"},
+       doc: "rad per sample, as GNU Radio (6.28 / 400)"}
   start: {CONTROL: 1}
 tests:                        # python glidelink.py test fll: block parameters per case
   - {}

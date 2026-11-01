@@ -9,13 +9,12 @@ version: 1.0.0
 data:
   input: sc16                 # {Q[31:16], I[15:0]}
   output: sc16
-  tuser: passed with its sample
 function: >-
   As GNU Radio's agc_cc, in fixed point, one sample at a time: y = sat16((x * g + 2^15) >> 16)
   on I and Q (g: 1.0 = 65536), then m = max(|yI|, |yQ|) + (3 min(|yI|, |yQ|) >> 3) (magnitude,
   within 7 %), g += (2 (REFERENCE - m)) >> RATE_SHIFT (arithmetic shift), g kept within
-  0 .. MAX_GAIN. Disabled: samples pass unchanged, the gain holds. Up to 50 MSPS at 200 MHz
-  (4 clock cycles per sample).
+  0 .. MAX_GAIN. Disabled: samples pass unchanged, the gain holds. Up to 40 MSPS at 200 MHz
+  (5 clock cycles per sample, 1 DSP slice).
 registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
   - name: CONTROL
     fields:

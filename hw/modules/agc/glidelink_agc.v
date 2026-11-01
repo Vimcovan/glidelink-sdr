@@ -2,9 +2,10 @@
 // GlideLink user module: AGC, as GNU Radio's agc_cc in fixed point.
 // Description and registers: module.yaml; reference model: model.py.
 //
-// One sample at a time, 4 cycles each (take, multiply, saturate / magnitude,
-// gain update and output), so the gain used for a sample is the one updated by
-// the sample before it, as in the software recursion (50 MSPS at 200 MHz):
+// One sample at a time, 5 cycles each (take, xI g, xQ g on one multiplier
+// (1 DSP slice) with yI saturated, yQ saturated, magnitude / gain update /
+// output), so the gain used for a sample is the one updated by the sample
+// before it, as in the software recursion (40 MSPS at 200 MHz):
 //   y = sat16((x * g + 2^15) >> 16), m = max(|yI|, |yQ|) + (3 min >> 3),
 //   g += (2 (REFERENCE - m)) >>> RATE_SHIFT, g within 0 .. MAX_GAIN.
 // Disabled: samples pass unchanged, the gain holds. Soft reset and flush set
@@ -31,38 +32,29 @@ module glidelink_agc (
   input             s_axis_tvalid,
   output            s_axis_tready,
   input     [31:0]  s_axis_tdata,
-  input     [71:0]  s_axis_tuser,
-  input             s_axis_tlast,
 
   output            m_axis_tvalid,
   input             m_axis_tready,
-  output    [31:0]  m_axis_tdata,
-  output    [71:0]  m_axis_tuser,
-  output            m_axis_tlast
+  output    [31:0]  m_axis_tdata
 );
 
-  localparam [1:0] S_TAKE = 2'd0, S_MUL = 2'd1, S_MAG = 2'd2, S_UPD = 2'd3;
+  localparam [2:0] S_TAKE = 3'd0, S_MULI = 3'd1, S_MULQ = 3'd2, S_SATQ = 3'd3, S_UPD = 3'd4;
 
   wire        rst = !rstn || soft_reset || flush;
-  reg   [1:0] st = S_TAKE;
+  reg   [2:0] st = S_TAKE;
   reg  [25:0] g = 26'd65536;
   reg  signed [15:0] xi = 0, xq = 0;
-  reg  [71:0] user = 72'd0;
-  reg         last = 1'b0, byp = 1'b0;
-  reg  signed [42:0] pi = 0, pq = 0;        // x * g
+  reg         byp = 1'b0;
+  reg  signed [42:0] p = 0;                 // x * g, I then Q
   reg  signed [15:0] yi = 0, yq = 0;
   reg  [16:0] mag = 17'd0;
 
   reg         o_valid = 1'b0;
   reg  [31:0] o_data = 32'd0;
-  reg  [71:0] o_user = 72'd0;
-  reg         o_last = 1'b0;
 
   assign s_axis_tready = st == S_TAKE && !rst;
   assign m_axis_tvalid = o_valid;
   assign m_axis_tdata = o_data;
-  assign m_axis_tuser = o_user;
-  assign m_axis_tlast = o_last;
   assign gain_rd = g;
 
   // (p + 2^15) >>> 16 saturated to 16 bits
@@ -105,27 +97,23 @@ module glidelink_agc (
           if (s_axis_tvalid) begin
             xi <= s_axis_tdata[15:0];
             xq <= s_axis_tdata[31:16];
-            user <= s_axis_tuser;
-            last <= s_axis_tlast;
             byp <= !enable;
-            st <= S_MUL;
+            st <= S_MULI;
           end
-        S_MUL: begin
-          pi <= xi * $signed({1'b0, g});
-          pq <= xq * $signed({1'b0, g});
-          st <= S_MAG;
+        S_MULI:
+          st <= S_MULQ;
+        S_MULQ: begin
+          yi <= byp ? xi : sat(p);
+          st <= S_SATQ;
         end
-        S_MAG: begin
-          yi <= byp ? xi : sat(pi);
-          yq <= byp ? xq : sat(pq);
+        S_SATQ: begin
+          yq <= byp ? xq : sat(p);
           st <= S_UPD;
         end
         default: begin                      // S_UPD: magnitude, gain update, output
           if (out_free) begin
             o_valid <= 1'b1;
             o_data <= {yq, yi};
-            o_user <= user;
-            o_last <= last;
             if (!byp && !gain_wr)
               g <= gsum < 0 ? 26'd0 : gsum > $signed({3'd0, max_gain}) ? max_gain : gsum[25:0];
             st <= S_TAKE;
@@ -136,5 +124,9 @@ module glidelink_agc (
   end
 
   always @(*) mag = amax + {2'd0, amin3[18:3]};
+
+  // the multiplier: xI g in S_MULI, xQ g in S_MULQ
+  always @(posedge clk)
+    p <= (st == S_MULI ? xi : xq) * $signed({1'b0, g});
 
 endmodule

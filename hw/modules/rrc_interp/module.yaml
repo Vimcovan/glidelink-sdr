@@ -1,0 +1,36 @@
+# GlideLink user module (docs/module_guide.md): fixed-coefficient FIR on the Xilinx FIR Compiler
+id: rrc_interp
+name: RRC interpolator (Xilinx FIR Compiler)
+rtl: glidelink_rrc_interp.v
+top: glidelink_rrc_interp
+model: model.py
+id_value: 0x52524331          # "RRC1": the ID register, by which the PL block finds the slot
+version: 1.0.0
+uses: [fir_fixed]             # the shared wrapper and coefficient designs
+ip: [ip/rrc_interp.xci]            # vivado -mode batch -source ../fir_fixed/make_fir_ip.tcl -tclargs . Interpolation 4 12.5
+ip_files:
+  rrc_interp: {Coefficient_File: ip/rrc_interp.coe}   # python ../fir_fixed/fir_fixed.py .
+data:
+  input: sc16 symbols (1 per symbol)
+  output: sc16, 4 samples per symbol
+rate: {interp: "enable ? 4 : 1"}   # packets: the platform's
+function: >-
+  TX: the PC's QPSK symbols to the RF rate. root raised cosine pulse shaping, 4 samples per symbol, rolloff 0.35, 11 symbols (45 taps), gain 4 (the zeros of the interpolation), x 2^14; the coefficients are set when the image is built (ip/rrc_interp.coe from model.py
+  taps()). Output sat16((y + 2^13) >> 14) on I and Q. Up to 12.5 MSPS in (50 out) at 200 MHz.
+  Disabled: samples pass unchanged.
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
+  - name: CONTROL
+    fields:
+      - {name: enable, bits: 0, doc: "1 = filter, 0 = pass unchanged"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "the IP reset: delay line cleared"}
+  - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: TAPS, access: ro, value: 45, doc: "number of coefficients"}
+  - {name: INTERP, access: ro, value: 4}
+  - {name: DECIM, access: ro, value: 1}
+block:                        # the GNU Radio blocks (PL and software); no parameters: fixed coefficients
+  doc: >-
+    TX: the PC's QPSK symbols to the RF rate: root raised cosine pulse shaping, 4 samples per symbol, rolloff 0.35, 11 symbols (45 taps), gain 4 (the zeros of the interpolation), x 2^14. Fixed in the image.
+  params: []
+  start: {CONTROL: 1}
+tests:
+  - {}

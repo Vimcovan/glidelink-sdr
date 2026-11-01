@@ -22,9 +22,11 @@ sw/gr-glidelink/python/glidelink/modules.py.
     python gen_module.py ports <id>                the module's port list (Verilog)
     python gen_module.py grc <out_dir>             GRC block files of every module with a block
     python gen_module.py blocks                    ids of the modules with a block
+    python gen_module.py libraries                 shared directories with Python files they use
 """
 import glob
 import os
+import re
 import sys
 
 import yaml
@@ -53,6 +55,15 @@ AXIL_PORTS = """\
   output            s_axil_rvalid,
   input             s_axil_rready,
   output    [31:0]  s_axil_rdata,
+"""
+DATA_PORTS = """\
+  input             s_axis_tvalid,
+  output            s_axis_tready,
+  input     [31:0]  s_axis_tdata,
+
+  output            m_axis_tvalid,
+  input             m_axis_tready,
+  output    [31:0]  m_axis_tdata
 """
 AXIS_PORTS = """\
   input             s_axis_tvalid,
@@ -134,6 +145,25 @@ def signals(desc):
     return ports, regs
 
 
+def framed(desc):
+    """the platform makes the module's packets (glidelink_framer): the module sees samples only.
+    framing: module = the module keeps tuser / tlast itself (frame-based modules)"""
+    return desc.get("framing", "platform") != "module"
+
+
+def rate_exprs(desc, ports):
+    """(VARIABLE, interp expression, decim expression) of module.yaml rate:, the register ports
+    in the expressions as the wrapper's signals"""
+    rate = desc.get("rate", {}) or {}
+    if rate == "variable":
+        return 1, "8'd1", "8'd1"
+    names = {n: ("w_" if d == "output" else "r_") + n for d, _, n, _ in ports}
+
+    def expr(v):
+        return re.sub(r"\b[A-Za-z_]\w*\b", lambda m: names.get(m.group(0), m.group(0)), str(v))
+    return 0, expr(rate.get("interp", 1)), expr(rate.get("decim", 1))
+
+
 def ports_text(desc):
     ports, _ = signals(desc)
     lines = [STD_PORTS]
@@ -142,7 +172,7 @@ def ports_text(desc):
         for d, w, n, doc in ports:
             lines.append(f"  {d:<6} {_rng(w):<10}{n + ',':<24}// {doc}\n")
         lines.append("\n")
-    lines.append(AXIS_PORTS)
+    lines.append(DATA_PORTS if framed(desc) else AXIS_PORTS)
     return "".join(lines)
 
 
@@ -198,6 +228,34 @@ def wrapper(desc, out):
             body = " ".join(f"rd_data[{hi}:{lo}] = {e};" for hi, lo, e in rd[1])
             rd_case.append(f"      {idx}: begin rd_data = 32'd0; {body} end   // {r['name']}")
 
+    if framed(desc):
+        var, ie, de = rate_exprs(desc, ports)
+        sr = "".join(f" || r_{n}" for d, w, n, _ in ports if n == "soft_reset" and d == "input")
+        framer = f"""
+  // the packets (tuser, tlast) around the module: glidelink_framer
+  wire        u_s_tvalid, u_s_tready, u_m_tvalid, u_m_tready;
+  wire [31:0] u_s_tdata, u_m_tdata;
+  wire  [7:0] rate_l = {ie};
+  wire  [7:0] rate_m = {de};
+
+  glidelink_framer #(.VARIABLE({var})) i_framer (
+    .clk(clk), .rst(!rstn || flush{sr}), .interp(rate_l), .decim(rate_m),
+    .s_axis_tvalid(s_axis_tvalid), .s_axis_tready(s_axis_tready), .s_axis_tdata(s_axis_tdata),
+    .s_axis_tuser(s_axis_tuser), .s_axis_tlast(s_axis_tlast),
+    .m_axis_tvalid(m_axis_tvalid), .m_axis_tready(m_axis_tready), .m_axis_tdata(m_axis_tdata),
+    .m_axis_tuser(m_axis_tuser), .m_axis_tlast(m_axis_tlast),
+    .u_s_tvalid(u_s_tvalid), .u_s_tready(u_s_tready), .u_s_tdata(u_s_tdata),
+    .u_m_tvalid(u_m_tvalid), .u_m_tready(u_m_tready), .u_m_tdata(u_m_tdata));
+"""
+        stream = """    .s_axis_tvalid(u_s_tvalid), .s_axis_tready(u_s_tready), .s_axis_tdata(u_s_tdata),
+    .m_axis_tvalid(u_m_tvalid), .m_axis_tready(u_m_tready), .m_axis_tdata(u_m_tdata));"""
+    else:
+        framer = ""
+        stream = """    .s_axis_tvalid(s_axis_tvalid), .s_axis_tready(s_axis_tready), .s_axis_tdata(s_axis_tdata),
+    .s_axis_tuser(s_axis_tuser), .s_axis_tlast(s_axis_tlast),
+    .m_axis_tvalid(m_axis_tvalid), .m_axis_tready(m_axis_tready), .m_axis_tdata(m_axis_tdata),
+    .m_axis_tuser(m_axis_tuser), .m_axis_tlast(m_axis_tlast));"""
+
     conn = []
     pconn = (" #(" + ", ".join(f".{k}({k})" for k in params) + ")") if params else ""
     for d, w, n, _ in ports:
@@ -251,13 +309,11 @@ module {name}{ptxt} (
     endcase
   end
 
+{framer}
   {top}{pconn} i_mod (
     .clk(clk), .rstn(rstn), .flush(flush),
 {chr(10).join(conn)}
-    .s_axis_tvalid(s_axis_tvalid), .s_axis_tready(s_axis_tready), .s_axis_tdata(s_axis_tdata),
-    .s_axis_tuser(s_axis_tuser), .s_axis_tlast(s_axis_tlast),
-    .m_axis_tvalid(m_axis_tvalid), .m_axis_tready(m_axis_tready), .m_axis_tdata(m_axis_tdata),
-    .m_axis_tuser(m_axis_tuser), .m_axis_tlast(m_axis_tlast));
+{stream}
 
 endmodule
 """
@@ -370,6 +426,17 @@ def block_modules(root=None):
     return ids
 
 
+def block_libraries(root=None):
+    """the shared directories (uses:) of the modules with a block section: their Python files go
+    with the reference models (e.g. fir_fixed, the arithmetic of the fixed-coefficient FIRs)"""
+    root = root or os.path.join(HW, "modules")
+    libs = set()
+    for m in block_modules(root):
+        with open(os.path.join(root, m, "module.yaml"), encoding="utf8") as f:
+            libs.update((yaml.safe_load(f) or {}).get("uses") or [])
+    return sorted(l for l in libs if glob.glob(os.path.join(root, l, "*.py")))
+
+
 def main(argv):
     if len(argv) >= 3 and argv[0] == "wrapper":
         print(wrapper(module_desc.load(argv[1]), argv[2]))
@@ -384,6 +451,8 @@ def main(argv):
             print(i)
     elif argv == ["blocks"]:
         print("\n".join(block_modules()))
+    elif argv == ["libraries"]:
+        print("\n".join(block_libraries()))
     else:
         raise SystemExit(__doc__)
 

@@ -12,13 +12,13 @@ data:
   input: sc16
   output: sc16
   latency_cycles: 5
-  tuser: passed with its sample
+rate: {interp: "enable ? interp : 1", decim: "enable ? decim : 1"}   # packets: the platform's
 function: >-
   y[n] = sum h[k] x[n-k] on I and Q (real coefficients, 40-bit accumulation), then
-  (y + 2^(SHIFT-1)) >> SHIFT saturated to 16 bits. The delay line runs on across
-  packets; disabled samples pass unchanged and do not enter it. With INTERP = L the
-  input is zero-stuffed by L before the filter, with DECIM = M one output in every M
-  goes out (the phase runs on across packets).
+  (y + 2^(SHIFT-1)) >> SHIFT saturated to 16 bits. The delay line runs on (a soft
+  reset clears it); disabled samples pass unchanged and do not enter it. With INTERP = L the
+  input is zero-stuffed by L before the filter, with DECIM = M one output in every M goes
+  out (the M-th, counted from the reset).
 registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on
   - name: CONTROL
     fields:

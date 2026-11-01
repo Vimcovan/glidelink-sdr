@@ -6,11 +6,14 @@ frequency: 2^32 per cycle; samples Q15):
     k  = phase >> 20, C, S = round(32767 cos / sin(2 pi k / 4096))
     y  = x exp(-j phase): yI = sat16((xI C + xQ S + 2^14) >> 15), yQ = sat16((xQ C - xI S + 2^14) >> 15)
     e  = sign(yI) yQ - sign(yQ) yI  (sign(0) = -1), within +-32768
-    f' = f + ((e BETA) >> 16),  phase += f' + ((e ALPHA) >> 16),  f = f' within +-FREQ_MAX
+    f' = f + ((e BETA) >> BETA_SHIFT),  phase += f' + ((e ALPHA) >> ALPHA_SHIFT),
+    f = f' within +-FREQ_MAX
 
 which is GNU Radio's freq += beta err; phase += freq + alpha err (err = e / 32768) when
-ALPHA = alpha 2^33 / (2 pi) and BETA = beta 2^33 / (2 pi). Disabled: samples pass unchanged.
-loop_gains(w): GNU Radio's control loop gains (damping sqrt(2) / 2) as ALPHA, BETA.
+ALPHA / 2^ALPHA_SHIFT = alpha 2^17 / (2 pi), ALPHA within 17 bits (with e, 18 bits, it fits one
+DSP slice) as precise as that allows, and the same for BETA. Disabled: samples pass unchanged.
+loop_gains(w): GNU Radio's control loop gains (damping sqrt(2) / 2) as ALPHA, ALPHA_SHIFT, BETA,
+BETA_SHIFT.
 """
 import math
 import os
@@ -36,8 +39,15 @@ def loop_gains(w):
     z = math.sqrt(2) / 2
     d = 1 + 2 * z * w + w * w
     alpha, beta = 4 * z * w / d, 4 * w * w / d
-    k = 2 ** 33 / (2 * math.pi)
-    return round(alpha * k), round(beta * k)
+    return mantissa(alpha * 2 ** 17 / (2 * math.pi)) + mantissa(beta * 2 ** 17 / (2 * math.pi))
+
+
+def mantissa(g):
+    """(G, shift) with g ~ G / 2^shift, G within 17 bits"""
+    sh = 31
+    while sh > 0 and round(g * 2 ** sh) >= 1 << 17:
+        sh -= 1
+    return round(g * 2 ** sh), sh
 
 
 def s32(v):
@@ -77,6 +87,7 @@ class Model(module_desc.RegisterModel):
             return words.copy()
         C, S = self.tab
         alpha, beta, fmax = self.regs["ALPHA"], self.regs["BETA"], self.regs["FREQ_MAX"]
+        ash, bsh = self.regs["ALPHA_SHIFT"], self.regs["BETA_SHIFT"]
         phase, f = self.phase, self.f
         xi, xq = unpack(words)
         oi = np.empty(len(words), np.int64)
@@ -87,8 +98,8 @@ class Model(module_desc.RegisterModel):
             yq = sat16((b * C[k] - a * S[k] + (1 << 14)) >> 15)
             e = (yq if yi > 0 else -yq) - (yi if yq > 0 else -yi)
             e = -32768 if e < -32768 else 32768 if e > 32768 else e
-            f2 = f + ((e * beta) >> 16)
-            phase = (phase + f2 + ((e * alpha) >> 16)) & M32
+            f2 = f + ((e * beta) >> bsh)
+            phase = (phase + f2 + ((e * alpha) >> ash)) & M32
             f = -fmax if f2 < -fmax else fmax if f2 > fmax else f2
             oi[n], oq[n] = yi, yq
         self.phase, self.f = phase, f

@@ -5,7 +5,7 @@ Real coefficients h[0..TAPS-1] (signed 16 bit) applied to I and Q separately:
     y[n] = sum_k h[k] x[n-k]                     (x before the first sample = 0)
     out  = sat16((y + r) >> SHIFT),  r = 2^(SHIFT-1) for SHIFT > 0, else 0
 
-The delay line runs on across packets; a soft reset clears it. With
+The delay line runs on; a soft reset clears it. With
 CONTROL.enable = 0 the samples pass unchanged and do not enter the delay line.
 Coefficients are written to a shadow set (COEF_ADDR, then COEF_DATA with
 auto-increment) and take effect together on CONTROL.load. Model: the module at register level

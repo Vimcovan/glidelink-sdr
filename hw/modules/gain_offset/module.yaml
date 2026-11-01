@@ -9,7 +9,6 @@ version: 1.0.0
 data:
   input: sc16                 # {Q[31:16], I[15:0]}
   output: sc16
-  tuser: passed with its sample
 function: >-
   I and Q each: sat16(((x * GAIN + 2^13) >> 14) + OFFSET), GAIN signed (1.0 = 16384),
   OFFSET_I / OFFSET_Q signed 16 bit. Disabled: samples pass unchanged.

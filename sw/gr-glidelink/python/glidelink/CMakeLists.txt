@@ -33,6 +33,14 @@ foreach(m ${GL_BLOCK_MODULES})
     install(FILES ${HW_MODULES}/${m}/model.py ${HW_MODULES}/${m}/module.yaml
             DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink/modules/${m})
 endforeach()
+# the Python files of the shared directories those modules use (uses:, e.g. fir_fixed)
+execute_process(COMMAND ${PYTHON_EXECUTABLE} ${HW_DIR}/scripts/gen_module.py libraries
+                OUTPUT_VARIABLE GL_BLOCK_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+string(REPLACE "\n" ";" GL_BLOCK_LIBS "${GL_BLOCK_LIBS}")
+foreach(l ${GL_BLOCK_LIBS})
+    file(GLOB GL_LIB_PY ${HW_MODULES}/${l}/*.py)
+    install(FILES ${GL_LIB_PY} DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink/modules/${l})
+endforeach()
 
 ########################################################################
 # Handle the unit tests

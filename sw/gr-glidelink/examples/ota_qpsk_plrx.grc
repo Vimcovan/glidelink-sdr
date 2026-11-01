@@ -33,7 +33,7 @@ blocks:
 - name: sps
   id: variable
   parameters:
-    comment: samples per symbol at the RF rate
+    comment: 'samples per symbol at the RF rate (4, rrc_interp in the image)'
     value: '4'
   states:
     coordinate: [320, 8]
@@ -42,7 +42,7 @@ blocks:
 - name: decim
   id: variable
   parameters:
-    comment: RX decimation in the PL
+    comment: 'RX decimation in the PL (2, lp_decim in the image)'
     value: '2'
   states:
     coordinate: [400, 8]
@@ -73,26 +73,6 @@ blocks:
     value: digital.constellation_qpsk().base()
   states:
     coordinate: [680, 8]
-    rotation: 0
-    state: enabled
-- name: tx_taps
-  id: variable
-  parameters:
-    comment: 'RRC pulse for the PL interpolation by sps: 11 symbols, gain sps (the zeros of the
-      interpolation), coefficients x 2^14 (FIR shift 14)'
-    value: '[int(round(c * 2**14)) for c in firdes.root_raised_cosine(sps, sps, 1.0, 0.35, 11 * sps + 1)]'
-  states:
-    coordinate: [200, 80]
-    rotation: 0
-    state: enabled
-- name: rx_taps
-  id: variable
-  parameters:
-    comment: 'low-pass before the PL decimation by 2: 4 MHz, transition 1.5 MHz (the QPSK occupies
-      +-3.375 MHz), coefficients x 2^15 (FIR shift 15)'
-    value: '[int(round(c * 2**15)) for c in firdes.low_pass(1.0, samp_rate, 4e6, 1.5e6)]'
-  states:
-    coordinate: [480, 80]
     rotation: 0
     state: enabled
 - name: tx_atten
@@ -196,15 +176,11 @@ blocks:
     rotation: 0
     state: enabled
 - name: tx_fir
-  id: glidelink_fir
+  id: glidelink_rrc_interp
   parameters:
     args: '"driver=glidelink,uri=ip:192.168.4.1"'
-    comment: interpolation by sps, RRC pulse
-    decim: '1'
-    interp: sps
-    shift: '14'
+    comment: 'RRC pulse, interpolation by 4 (coefficients fixed in the image)'
     slot: '-1'
-    taps: tx_taps
   states:
     coordinate: [920, 260]
     rotation: 0
@@ -257,25 +233,12 @@ blocks:
     coordinate: [420, 440]
     rotation: 0
     state: enabled
-- name: mf_taps
-  id: variable
-  parameters:
-    comment: RRC matched filter at rx_sps (FIR in slot 4), gain 1, coefficients x 2^15
-    value: '[int(round(c * 2**15)) for c in firdes.root_raised_cosine(1.0, rx_sps, 1.0, 0.35, 11 * rx_sps + 1)]'
-  states:
-    coordinate: [760, 80]
-    rotation: 0
-    state: enabled
 - name: rx_fir
-  id: glidelink_fir
+  id: glidelink_lp_decim
   parameters:
     args: '"driver=glidelink,uri=ip:192.168.3.1"'
-    comment: low-pass, decimation by 2 (slot 1)
-    decim: decim
-    interp: '1'
-    shift: '15'
-    slot: '1'
-    taps: rx_taps
+    comment: 'low-pass, decimation by 2 (coefficients fixed in the image)'
+    slot: '-1'
   states:
     coordinate: [220, 460]
     rotation: 0
@@ -309,15 +272,11 @@ blocks:
     rotation: 0
     state: enabled
 - name: mf
-  id: glidelink_fir
+  id: glidelink_rrc_mf
   parameters:
     args: '"driver=glidelink,uri=ip:192.168.3.1"'
-    comment: RRC matched filter (slot 4, the image's second FIR)
-    decim: '1'
-    interp: '1'
-    shift: '15'
-    slot: '4'
-    taps: mf_taps
+    comment: 'RRC matched filter at 2 samples per symbol (fixed in the image)'
+    slot: '-1'
   states:
     coordinate: [820, 460]
     rotation: 0

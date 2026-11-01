@@ -1,0 +1,35 @@
+# GlideLink user module (docs/module_guide.md): fixed-coefficient FIR on the Xilinx FIR Compiler
+id: rrc_mf
+name: RRC matched filter (Xilinx FIR Compiler)
+rtl: glidelink_rrc_mf.v
+top: glidelink_rrc_mf
+model: model.py
+id_value: 0x52524332          # "RRC2": the ID register, by which the PL block finds the slot
+version: 1.0.0
+uses: [fir_fixed]             # the shared wrapper and coefficient designs
+ip: [ip/rrc_mf.xci]            # vivado -mode batch -source ../fir_fixed/make_fir_ip.tcl -tclargs . Single_Rate 1 25
+ip_files:
+  rrc_mf: {Coefficient_File: ip/rrc_mf.coe}   # python ../fir_fixed/fir_fixed.py .
+data:
+  input: sc16, 2 samples per symbol
+  output: sc16, matched-filtered
+function: >-
+  RX: before the symbol sync. root raised cosine matched filter, 2 samples per symbol, rolloff 0.35, 11 symbols (23 taps), gain 1, x 2^15; the coefficients are set when the image is built (ip/rrc_mf.coe from model.py
+  taps()). Output sat16((y + 2^14) >> 15) on I and Q. Up to 25 MSPS at 200 MHz.
+  Disabled: samples pass unchanged.
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
+  - name: CONTROL
+    fields:
+      - {name: enable, bits: 0, doc: "1 = filter, 0 = pass unchanged"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "the IP reset: delay line cleared"}
+  - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: TAPS, access: ro, value: 23, doc: "number of coefficients"}
+  - {name: INTERP, access: ro, value: 1}
+  - {name: DECIM, access: ro, value: 1}
+block:                        # the GNU Radio blocks (PL and software); no parameters: fixed coefficients
+  doc: >-
+    RX: before the symbol sync: root raised cosine matched filter, 2 samples per symbol, rolloff 0.35, 11 symbols (23 taps), gain 1, x 2^15. Fixed in the image.
+  params: []
+  start: {CONTROL: 1}
+tests:
+  - {}

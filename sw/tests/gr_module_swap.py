@@ -7,7 +7,9 @@ with the block parameters of each entry of `tests` in the module's module.yaml (
 generated from it; the PL block finds the module's slot by ID). N input samples, a whole number
 of DMA buffers; raw host port 1. The host port 1 RX DMA hands over whole buffers only, so B
 gets the whole buffers of the output (all of it for a module with one output per input), and
-those must equal A's (within `tolerance` LSB where the model is not exact, exact: false). The
+those must equal A's (within `tolerance` LSB where the model is not exact, exact: false), past
+a start-up stretch: the PL module goes on from what it held (e.g. a FIR's delay line, a
+decimator's phase), so the model may be a few inputs later and the output a sample or two off. The
 Host Source waits for data like a UHD source, so B is stopped once they are in.
 
     python gr_module_swap.py <id> [--args driver=glidelink,uri=ip:192.168.3.1] [--case K]
@@ -49,12 +51,15 @@ for case in cases:
     params = {k: v for k, v in case.items() if k not in desc["offsets"]}
     label = ", ".join(f"{k}={v}" for k, v in params.items()) or "defaults"
 
-    ta = gr.top_block()
-    src_a, sink_a = blocks.vector_source_c(x), blocks.vector_sink_c()
-    sw = sw_cls(**params)               # Python blocks must stay referenced while the flowgraph runs
-    ta.connect(src_a, sw, sink_a)
-    ta.run()
-    out_a = np.array(sink_a.data(), np.complex64)
+    def model(skip_in=0):
+        ta = gr.top_block()
+        src_a, sink_a = blocks.vector_source_c(x[skip_in:]), blocks.vector_sink_c()
+        sw = sw_cls(**params)           # Python blocks must stay referenced while the flowgraph runs
+        ta.connect(src_a, sw, sink_a)
+        ta.run()
+        return np.array(sink_a.data(), np.complex64)
+
+    out_a = model()
     need = len(out_a) // BUFFER * BUFFER
 
     tb = gr.top_block()
@@ -76,12 +81,26 @@ for case in cases:
     for sink in (pl.pl_inputs["0"], "host1_rx"):
         route(dev, sink, "none")
 
-    n = min(need, len(out_b))
-    d = out_a[:n] - out_b[:n]
-    err = float(np.max(np.abs(np.concatenate([d.real, d.imag])), initial=0) * 32768)
-    ok = n == need > 0 and len(out_b) == need and err <= tol
+    # The module starts from whatever it held before the stream (the slot is flushed, not powered
+    # up): a FIR's delay line, a decimator's phase. So, as glidelink.py test after a mid-stream
+    # flush: the model may start a few inputs later and the output be a sample or two off; past a
+    # start-up stretch (at most half) the output must be the model's.
+    def compare(ref, shift):
+        g = out_b[shift:] if shift >= 0 else np.concatenate([np.zeros(-shift, np.complex64), out_b])
+        n = min(need, len(g), len(ref))
+        d = np.max(np.abs(np.stack([(ref[:n] - g[:n]).real, (ref[:n] - g[:n]).imag])), axis=0) * 32768
+        bad = np.nonzero(d > tol + 0.5)[0]
+        i0 = int(bad[-1]) + 1 if len(bad) else 0
+        return float(d[i0:].max(initial=0)), i0, n
+
+    for skip_in, shift in [(0, 0)] + [(p, sh) for p in range(8) for sh in (0, 1, -1, 2, -2) if (p, sh) != (0, 0)]:
+        err, i0, n = compare(out_a if skip_in == 0 else model(skip_in), shift)
+        if err <= tol and i0 <= n // 2:
+            break
+    ok = need > 0 and len(out_b) == need and err <= tol and i0 <= n // 2
     failed += not ok
+    note = (f", aligned {skip_in} input(s) later, output shifted by {shift}" if skip_in or shift else "") +            (f", the first {i0} differ (start-up)" if i0 else "")
     print(f"{'PASS' if ok else 'FAIL'}  {a.id} in slot {pl.regs.slot}, {label}: {len(out_b)} of {need} samples "
-          f"({len(out_a)} from the model), largest difference {err:.0f} LSB (allowed {tol})")
+          f"({len(out_a)} from the model), largest difference {err:.0f} LSB (allowed {tol}){note}")
 print("PASS" if not failed else "FAIL")
 sys.exit(1 if failed else 0)
