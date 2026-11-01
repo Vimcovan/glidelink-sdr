@@ -83,6 +83,19 @@ int main(int argc, char **argv)
 	    iio_device_reg_read(shell, 0x054, &cfg) == 0) {
 		iio_device_reg_write(shell, 0x054, cfg & ~0xcu);
 		iio_device_reg_write(shell, 0x05C, 3);
+		// host port 0 straight to the RF both ways (RF TX <- host 0 TX, host 0 RX <- RF RX):
+		// a PL flowgraph may have routed them elsewhere or to none. A source feeds one sink,
+		// so any other sink still fed by RF RX or host 0 TX is unrouted.
+		uint32_t caps = 0;
+		iio_device_reg_read(shell, 0x008, &caps);
+		unsigned slots = caps >> 24;
+		for (unsigned j = 2; j < 3 + slots; j++) {
+			uint32_t r = 0;
+			if (iio_device_reg_read(shell, 0x1000 + 4 * j, &r) == 0 && (r == 0 || r == 1))
+				iio_device_reg_write(shell, 0x1000 + 4 * j, 0xF);
+		}
+		iio_device_reg_write(shell, 0x1000, 1);
+		iio_device_reg_write(shell, 0x1004, 0);
 	}
 	// shell 1.5 and later deliver RX as the 12-bit ADC value shifted left by 4
 	int rx_shift = version >= 0x00010500 ? 4 : 0;
