@@ -174,7 +174,7 @@ class Model(module_desc.RegisterModel):
 `GLIDELINK_SSH_KEY`、`GLIDELINK_SSH_USER`（默认 root）。
 
 上板核对软件块与 PL 块：`python sw/tests/gr_module_swap.py <id> --args driver=glidelink,uri=ip:<板子地址>`（在装了 gr-glidelink 的环境中运行，
-Windows 在开始菜单的 "radioconda Prompt" 中运行：直接调用 `D:\radioconda\python.exe` 时环境没有激活，SoapySDR 的驱动模块加载不了）。它用 `tests` 的每一项参数，把同一段信号分别送进软件块和经主机端口 1 送进 PL 块，逐样点比较。
+Windows 在开始菜单的 "radioconda Prompt" 中运行：直接调用 `D:\radioconda\python.exe` 时环境没有激活，SoapySDR 的驱动模块加载不了）。它用 `tests` 的每一项参数，把同一段信号分别送进软件块和经主机端口 1 送进 PL 块，逐样点比较；PL 模块接着上一次的状态工作（如滤波器延迟线里的旧样点），开头一段可以不同，输出中会注明这段的长度。
 
 底层的单项操作仍可单独用：`hw/library/glidelink_module/tb/run_module_sim.ps1 hw/modules/<id> -Vectors <目录>`（按自己的 `regs.hex`、`in.hex`、`out.hex`、
 `reads.hex` 仿真），`GLIDELINK_IMAGE=<镜像>` 直接跑 Vivado（`hw/README.md`），手动换镜像见用户指南第 4 节。
