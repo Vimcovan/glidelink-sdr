@@ -6,8 +6,9 @@ must carry the time given to writeStream for its first sample (the passthrough k
 the RF TX streamer acts on the time). In header mode host port 1 RX drops whole packets when its
 DMA has no room (as for the RF source), so the sender is paced to --rate for a reader in Python.
 
-The host RX DMA hands over whole buffers only, so each run moves a whole number of them:
-raw packets of 4096 words, header packets of 4092 samples (4096 words with the header).
+The host RX DMA hands over whole buffers only, so each run moves a whole number of them: one
+packet per buffer (bufferLength is in words), raw packets of 4096 words, header packets of 4092
+samples (4096 words with the header).
 
     python3 host1_soapy.py [--args driver=glidelink] [--packets 200]
 """
@@ -34,11 +35,11 @@ rate = d.getSampleRate(SOAPY_SDR_RX, 0)
 failures = []
 
 
-BUFFER = 16384
+BUFFER = 4096                           # words (samples of the stream) per DMA buffer
 
 
 def run(headers):
-    length = BUFFER // 4 - (4 if headers else 0)
+    length = BUFFER - (4 if headers else 0)
     args = {"port": "1", "headers": "true" if headers else "false", "bufferLength": str(BUFFER)}
     rx = d.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CS16, [0], args)
     tx = d.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CS16, [0], args)

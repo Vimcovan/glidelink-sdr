@@ -6,14 +6,15 @@ their PL proxies leaves the flowgraph's output unchanged.
        -> head -> vector sink; the PL blocks (generated from module.yaml) find the modules'
        slots by ID and are connected as in GRC (pl_connect: host1_tx -> NCO -> FIR -> host1_rx)
 
-Both get the same complex input; the first N outputs of A and B must be identical, sample for
-sample. Raw host port (no headers), N a whole number of DMA buffers (the RX DMA hands over whole
-buffers only), and PAD buffers more sent after them: the last buffers of a host port 1 transfer
-stay in the path until more data follows.
+Both get the same complex input; A's and B's outputs must be identical, sample for sample.
+Raw host port (no headers), N a whole number of DMA buffers (the RX DMA hands over whole
+buffers only). The Host Source does not end by itself (as a UHD source, it waits for more
+data), so B is stopped once its N samples are in.
 
     python3 gr_proxy_swap.py [--args driver=glidelink,uri=ip:192.168.3.1]
 """
 import argparse
+import time
 
 import numpy as np
 from gnuradio import blocks, gr, glidelink
@@ -26,15 +27,14 @@ a = ap.parse_args()
 
 BUFFER = 16384
 N = a.buffers * BUFFER
-PAD = 4 * BUFFER
 SAMP_RATE = 2.5e6
 FREQ = -137.5e3
 TAPS = [int(c) for c in glidelink.modules.model("fir").lowpass(0.12)]
 SHIFT = 15
 
 rng = np.random.default_rng(11)
-t = np.arange(N + PAD)
-x = (0.6 * np.exp(2j * np.pi * 0.07 * t) + 0.15 * (rng.normal(size=N + PAD) + 1j * rng.normal(size=N + PAD)))
+t = np.arange(N)
+x = (0.6 * np.exp(2j * np.pi * 0.07 * t) + 0.15 * (rng.normal(size=N) + 1j * rng.normal(size=N)))
 x = np.round(np.clip(x.real, -1, 1) * 32767) / 32768 + 1j * np.round(np.clip(x.imag, -1, 1) * 32767) / 32768
 x = list(x.astype(np.complex64))
 
@@ -47,7 +47,7 @@ sw_nco = glidelink.nco_model(SAMP_RATE, FREQ, 0.0)
 sw_fir = glidelink.fir_model(TAPS, SHIFT)
 ta.connect(src_a, sw_nco, sw_fir, sink_a)
 ta.run()
-out_a = np.array(sink_a.data(), np.complex64)[:N]
+out_a = np.array(sink_a.data(), np.complex64)
 
 # B: the same in the PL
 tb = gr.top_block()
@@ -64,7 +64,12 @@ tb.connect(host_source, head, sink_b)
 glidelink.pl_connect(host_sink, "0", pl_nco, "0")
 glidelink.pl_connect(pl_nco, "0", pl_fir, "0")
 glidelink.pl_connect(pl_fir, "0", host_source, "0")
-tb.run()
+tb.start()
+deadline = time.time() + 30
+while len(sink_b.data()) < N and time.time() < deadline:
+    time.sleep(0.05)
+tb.stop()
+tb.wait()
 out_b = np.array(sink_b.data(), np.complex64)
 dev = glidelink.pl.device(a.args)
 for sink in (pl_nco.pl_inputs["0"], pl_fir.pl_inputs["0"], "host1_rx"):

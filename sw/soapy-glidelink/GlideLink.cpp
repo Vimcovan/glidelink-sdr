@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -71,6 +72,7 @@ struct Stream {
 	iio_buffer *buf = nullptr;
 	size_t pos = 0;                 // samples consumed (RX) / filled (TX) in buf
 	size_t avail = 0;               // RX: samples in buf
+	long txFree = -1;               // TX: buf's free bytes with nothing queued (data_available)
 
 	// packet headers on host port 0 (shell >= 1.1, docs/phase1_shell.md D4)
 	bool headers = false;
@@ -653,6 +655,8 @@ public:
 			s->buf = iio_device_create_buffer(s->dev, s->bufferLength, false);
 			if (s->buf)
 				s->step = iio_buffer_step(s->buf);
+			if (s->buf && s->direction == SOAPY_SDR_TX)
+				s->txFree = dataAvailable(s);
 		}
 		if (gateRx)
 			setRxEnable(true);
@@ -1179,11 +1183,38 @@ private:
 			return;
 		if (s->direction == SOAPY_SDR_TX && s->pos > 0)
 			pushBuffer(s);
+		if (s->buf && s->direction == SOAPY_SDR_TX)
+			drainTx(s);
 		if (s->buf)
 			iio_buffer_destroy(s->buf);
 		s->buf = nullptr;
 		s->sd.reset();                      // TX: sends what is queued, then ends the stream
 		s->pos = s->avail = 0;
+	}
+
+	static long dataAvailable(Stream *s)
+	{
+		char v[32];
+		return iio_device_buffer_attr_read(s->dev, "data_available", v, sizeof v) > 0 ? std::atol(v) : -1;
+	}
+
+	// TX: wait until the DMA has sent the buffers pushed (an output buffer's data_available
+	// counts its free blocks), so that destroying the buffer does not drop the stream's last
+	// samples; give up after 1 s without progress (nothing downstream takes the words)
+	static void drainTx(Stream *s)
+	{
+		long n, last = -1;
+		int idle = 0;
+		while ((n = dataAvailable(s)) >= 0 && n < s->txFree) {
+			if (n != last) {
+				last = n;
+				idle = 0;
+			} else if (++idle == 1000) {
+				SoapySDR::logf(SOAPY_SDR_WARNING, "GlideLink: TX stream closed with %ld bytes not sent", s->txFree - n);
+				return;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
 	}
 
 	iio_channel *phyChan(const int dir, const size_t ch) const

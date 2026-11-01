@@ -52,6 +52,7 @@ namespace streamd {
 using sock_t = SOCKET;
 const sock_t BAD_SOCK = INVALID_SOCKET;
 inline void sockClose(sock_t s) { closesocket(s); }
+const int SHUT_SEND = SD_SEND;
 inline int sockPoll(sock_t s, int ms)
 {
 	WSAPOLLFD p = {s, POLLRDNORM, 0};
@@ -75,6 +76,7 @@ const int SEND_FLAGS = 0;
 using sock_t = int;
 const sock_t BAD_SOCK = -1;
 inline void sockClose(sock_t s) { close(s); }
+const int SHUT_SEND = SHUT_WR;
 inline int sockPoll(sock_t s, int ms)
 {
 	pollfd p = {s, POLLIN, 0};
@@ -195,8 +197,21 @@ public:
 			th_.join();
 		if (udp_ != BAD_SOCK)
 			sockClose(udp_);
-		if (tcp_ != BAD_SOCK)
-			sockClose(tcp_);                // ends the stream on the board
+		if (tcp_ == BAD_SOCK)
+			return;
+		// TX: tell the board how many packets were sent (the close can overtake packets still
+		// queued on the way, e.g. by fq_codel). The board closes its end once the stream is
+		// over (TX: its DMA has sent all), so the device is free again when this returns.
+		if (!rx_) {
+			char line[32];
+			snprintf(line, sizeof line, "END %u\n", dataSeq_);
+			sendAll(tcp_, line, strlen(line));
+		}
+		shutdown(tcp_, SHUT_SEND);          // ends the stream on the board
+		char c;
+		while (sockPoll(tcp_, 10000) > 0 && recv(tcp_, &c, 1, 0) > 0)
+			;
+		sockClose(tcp_);
 	}
 
 	size_t step() const { return step_; }
@@ -397,7 +412,6 @@ private:
 	{
 		std::vector<char> pkt(frame_);
 		uint64_t sent = 0, boardConsumed = 0;
-		uint32_t seq = 0;
 		char st[64];
 		auto readStatus = [&](int ms) {
 			if (ms > 0 && sockPoll(udp_, ms) <= 0)
@@ -431,7 +445,7 @@ private:
 				readStatus(0);
 				while (sent + len - boardConsumed > boardCapacity_ && !stop_)
 					readStatus(100);
-				Header h = {MAGIC, TYPE_DATA, uint16_t(off + len == b.len ? FLAG_END : 0), seq++, 0};
+				Header h = {MAGIC, TYPE_DATA, uint16_t(off + len == b.len ? FLAG_END : 0), dataSeq_++, 0};
 				memcpy(pkt.data(), &h, HDR);
 				memcpy(pkt.data() + HDR, b.data.data() + off, len);
 				int k;
@@ -456,6 +470,7 @@ private:
 	size_t step_ = 0, frame_ = 0, payload_ = 0, bufBytes_ = 0;
 	uint64_t myCapacity_ = 0, boardCapacity_ = 0;
 	uint32_t statusSeq_ = 0;
+	uint32_t dataSeq_ = 0;                  // TX: data packets sent
 	std::thread th_;
 	std::mutex m_;
 	std::condition_variable cv_;

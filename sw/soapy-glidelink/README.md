@@ -30,7 +30,9 @@ SoapySDR 模块，经 libiio 访问 ADI 的 ad9361 / cf_axi_adc / cf_axi_dds 驱
     Windows 8000（板子的 USB 网口用巨型帧），Linux 取连接的路径 MTU 减 28、至多 8000（WSL 中为 1472）。UDP 流中丢了包时，
     原始模式下 `readStream` 先返回一次 `SOAPY_SDR_OVERFLOW`，包头模式下丢掉当前的包、在下一个包头处接上。
   - `bufferLength` 为每个 IIO 缓冲区的样点数（默认 65536），TX 在缓冲区写满或带 `END_BURST` 时提交。RX 的 DMA 按整块交付，
-    原始模式下不满一块的尾巴要等后续数据。
+    原始模式下不满一块的尾巴要等后续数据。停止 TX 流（`deactivateStream` / `closeStream`）时先提交未满的缓冲区，
+    等 DMA 把排队的缓冲区全部送出（最多 1 s 没有进展）再返回，经 glidelink-streamd 时由板子等待（`sw/streamd/README.md`），
+    所以写入的最后一批采样不会因停流而丢失；GNU Radio 在汇的输入结束时就停止它，正好用到这一点。
   - 外壳 1.1 起默认走包头（流参数 `headers=false` 关闭）：`readStream` 给出 `timeNs`，包头中的丢包标志变为 `SOAPY_SDR_OVERFLOW`，
     读完带“突发结束”标志的包时给出 `SOAPY_SDR_END_BURST`（外壳 1.3 起）；`writeStream` 每次调用为一个包，带 `SOAPY_SDR_HAS_TIME`
     定时发送，`SOAPY_SDR_END_BURST` 结束突发。包头模式下主机 RX 端口在 DMA 来不及收时整包丢弃，不反压上游。

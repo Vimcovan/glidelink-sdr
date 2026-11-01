@@ -20,7 +20,12 @@
 //   data:   payload bytes (a multiple of the sample size); flag bit 0 = last packet of a buffer
 //           (TX: the board pushes then, a shorter buffer as a partial one)
 //   status: uint64 bytes consumed since the start of the stream
-// Closing the TCP connection ends the stream.
+// Closing the TCP connection ends the stream. TX: the PC first sends "END <data packets sent>\n"
+// and shuts down its sending side; the board takes the packets up to that count (the close can
+// arrive before packets still on the way; at most 1 s without one), pushes what it holds, waits
+// until the DMA has sent all of it (at most 1 s without progress) and then closes its end, so
+// the PC knows the stream's last samples have left the DMA. Without the END line the board takes
+// the packets already in its socket.
 //
 //     glidelink_streamd [port]
 
@@ -66,12 +71,17 @@ struct hdr {
 struct stream {
 	bool tx;
 	int udp;                        // connected to the PC's UDP port
+	struct iio_device *dev;
 	struct iio_buffer *buf;
 	size_t step, len;               // bytes per sample, samples per buffer
+	long tx_free;                   // TX: the buffer's free bytes with nothing queued (data_available)
 	size_t frame;                   // UDP payload bytes at most (header included)
 	uint64_t peer_capacity;         // RX: the PC's buffer capacity
 	uint64_t capacity;              // TX: the board's
 	volatile bool stop;
+	volatile bool ending;           // TX: the PC closed the stream; send what came before
+	bool end_known;                 // TX: the PC's END line came: end_seq data packets in all
+	uint32_t end_seq;
 	uint64_t lost;                  // TX: packets missing (sequence gaps)
 	uint64_t backwards;             // TX: packets older than the one before (should never happen)
 };
@@ -227,14 +237,41 @@ static void rx_loop(struct stream *st)
 	}
 }
 
+static long data_available(struct iio_device *dev)
+{
+	char v[32];
+	return iio_device_buffer_attr_read(dev, "data_available", v, sizeof v) > 0 ? atol(v) : -1;
+}
+
+// TX, end of stream: wait until the DMA has sent the blocks pushed (an output buffer's
+// data_available counts its free blocks), so the stream's last samples are not dropped when the
+// buffer is destroyed; give up after 1 s without progress (nothing downstream takes the words)
+static void tx_drain(struct stream *st)
+{
+	long n, last = -1;
+	int idle = 0;
+	while ((n = data_available(st->dev)) >= 0 && n < st->tx_free) {
+		if (n != last) {
+			last = n;
+			idle = 0;
+		} else if (++idle == 1000) {
+			syslog(LOG_WARNING, "tx: %ld bytes not sent after 1 s without progress, dropped", st->tx_free - n);
+			return;
+		}
+		usleep(1000);
+	}
+}
+
 // TX: receive packets, copy them into the DMA block, push at the end of each buffer; report the
-// bytes taken from the socket every 1/8 of the capacity
+// bytes taken from the socket every 1/8 of the capacity. When the PC closes the stream, take the
+// packets it sent before (as many as its END line says), push the rest and wait for the DMA.
 static void tx_loop(struct stream *st)
 {
 	size_t full = st->len * st->step, pos = 0;
 	uint64_t consumed = 0, reported = 0, every = st->capacity / 8;
 	uint32_t expect = 0, status_seq = 0;
 	bool first = true;
+	int idle = 0;                   // ending: polls without a packet
 	char *slots = malloc((size_t)BATCH * st->frame);
 	struct iovec iov[BATCH];
 	struct mmsghdr msgs[BATCH];
@@ -244,12 +281,21 @@ static void tx_loop(struct stream *st)
 			iov[i] = (struct iovec){slots + (size_t)i * st->frame, st->frame};
 			msgs[i] = (struct mmsghdr){.msg_hdr = {.msg_iov = &iov[i], .msg_iovlen = 1}};
 		}
+		bool ending = __atomic_load_n(&st->ending, __ATOMIC_ACQUIRE);
+		if (ending && st->end_known && (int32_t)(expect - st->end_seq) >= 0)
+			break;                  // all the PC sent is in
 		struct pollfd p = {st->udp, POLLIN, 0};
-		if (poll(&p, 1, 100) <= 0)
+		int n = poll(&p, 1, ending && !st->end_known ? 0 : 100) > 0
+				? recvmmsg(st->udp, msgs, BATCH, MSG_DONTWAIT, NULL) : 0;
+		if (n <= 0) {
+			if (ending && (!st->end_known || ++idle == 10)) {
+				if (st->end_known)
+					syslog(LOG_WARNING, "tx: %u packets did not arrive", st->end_seq - expect);
+				break;
+			}
 			continue;
-		int n = recvmmsg(st->udp, msgs, BATCH, MSG_DONTWAIT, NULL);
-		if (n <= 0)
-			continue;
+		}
+		idle = 0;
 		for (int i = 0; i < n && !st->stop; i++) {
 			char *pkt = slots + (size_t)i * st->frame;
 			size_t k = msgs[i].msg_len;
@@ -290,6 +336,11 @@ static void tx_loop(struct stream *st)
 		}
 	}
 	free(slots);
+	if (st->stop)
+		return;
+	if (pos > 0 && iio_buffer_push_partial(st->buf, pos / st->step) < 0)
+		return;
+	tx_drain(st);
 }
 
 static void *worker(void *arg)
@@ -356,7 +407,9 @@ static void *client(void *arg)
 		sendf(fd, "ERR cannot create the buffer: %s\n", strerror(errno));
 		goto out;
 	}
+	st.dev = dev;
 	st.step = iio_buffer_step(st.buf);
+	st.tx_free = data_available(dev);
 	if (frame - HDR < st.step) {
 		sendf(fd, "ERR frame too small\n");
 		goto out;
@@ -392,13 +445,31 @@ static void *client(void *arg)
 	pthread_t t;
 	pthread_create(&t, NULL, worker, &st);
 	char c;
+	size_t n = 0;
 	struct pollfd p = {fd, POLLIN, 0};
 	while (!st.stop) {
-		if (poll(&p, 1, 200) > 0 && recv(fd, &c, 1, 0) <= 0)
+		if (poll(&p, 1, 200) <= 0)
+			continue;
+		if (recv(fd, &c, 1, 0) <= 0)
 			break;                  // the PC closed the stream
+		if (c != '\n') {
+			if (n + 1 < sizeof line)
+				line[n++] = c;
+			continue;
+		}
+		line[n] = 0;
+		n = 0;
+		if (sscanf(line, "END %u", &st.end_seq) == 1)
+			st.end_known = true;
 	}
-	st.stop = true;
+	if (st.tx) {
+		__atomic_store_n(&st.ending, true, __ATOMIC_RELEASE);
+	} else {
+		st.stop = true;
+		iio_buffer_cancel(st.buf);      // a refill waiting for data returns now
+	}
 	pthread_join(t, NULL);
+	st.stop = true;
 	if (st.tx)
 		syslog(LOG_INFO, "%s %s: end, %llu packets lost, %llu out of order", dir, devname,
 		       (unsigned long long)st.lost, (unsigned long long)st.backwards);
