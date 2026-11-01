@@ -1016,8 +1016,10 @@ private:
 		if (rx) {
 			unsigned addr = REG_ROUTE + 4 * hp.rxSink;
 			unsigned route = readRegister("FPGA", addr);
-			if (route == ROUTE_NONE && s->port == 0)
+			if (route == ROUTE_NONE && s->port == 0) {
 				route = SRC_RF_RX;
+				freeSource(SRC_RF_RX, hp.rxSink);
+			}
 			writeRegister("FPGA", addr, ROUTE_NONE);
 			writeRegister("FPGA", REG_PORT_RESET, hp.rxReset | slot);
 			writeRegister("FPGA", REG_CONFIG, cfg);
@@ -1026,8 +1028,36 @@ private:
 			writeRegister("FPGA", REG_PORT_RESET, hp.txReset | slot);
 			writeRegister("FPGA", REG_CONFIG, cfg);
 			unsigned addr = REG_ROUTE + 4 * SINK_RF_TX;
-			if (s->port == 0 && readRegister("FPGA", addr) == ROUTE_NONE)
+			if (s->port == 0 && readRegister("FPGA", addr) == ROUTE_NONE) {
+				freeSource(hp.txSource, SINK_RF_TX);
 				writeRegister("FPGA", addr, hp.txSource);
+			}
+		}
+	}
+
+	// A switch source feeds one sink at a time (as gr-glidelink's route()): before the module
+	// routes `src` to `sink` itself, any other sink still fed by `src` (e.g. a slot left
+	// routed by an earlier PL flowgraph) is set to none and flushed, with a warning
+	void freeSource(unsigned src, unsigned sink)
+	{
+		unsigned n = (readRegister("FPGA", 0x008) >> 24) & 0xff;
+		struct Sink { unsigned port, reset; std::string name; };
+		std::vector<Sink> sinks = {{0, 1u << 1, "rf_tx"}, {1, 1u << 0, "host0_rx"}, {3, 1u << 3, "host1_rx"}};
+		for (unsigned k = 0; k < n; k++)
+			sinks.push_back({slotPort(k), slotReset(k), "slot" + std::to_string(k) + "_in"});
+		std::string srcName = src == SRC_RF_RX ? "rf_rx" : src == 1 ? "host0_tx" : std::to_string(src);
+		std::string to;
+		for (const auto &j : sinks)
+			if (j.port == sink)
+				to = j.name;
+		for (const auto &j : sinks) {
+			if (j.port == sink || readRegister("FPGA", REG_ROUTE + 4 * j.port) != src)
+				continue;
+			writeRegister("FPGA", REG_ROUTE + 4 * j.port, ROUTE_NONE);
+			writeRegister("FPGA", REG_PORT_RESET, j.reset);
+			SoapySDR::logf(SOAPY_SDR_WARNING, "GlideLink: %s fed %s; now routed to %s, %s is none "
+				       "(a switch source feeds one sink)", srcName.c_str(), j.name.c_str(), to.c_str(),
+				       j.name.c_str());
 		}
 	}
 

@@ -15,9 +15,16 @@ the board; no data goes through GNU Radio. A block with PL ports names them in
 The switch connects a source to one sink at a time (the domain allows one
 connection per port). Routes of PL inputs left unconnected are not changed.
 
+The connections belong to the process that made them, as an RFNoC graph's do: when it ends
+(the GRC window closed, the script done) they are released, each sink still routed as
+connect() set it going back to none, so that a later plain RF stream gets rf_rx again;
+release() does the same at any time. A process that is killed releases nothing; the Soapy
+module then takes rf_rx / host0_tx back when it needs them for host port 0.
+
 radio: the AD9361 as PL blocks see it, the RF RX samples (rf_rx) and the RF TX
 input (rf_tx), with the RF settings, as RFNoC's radio block.
 """
+import atexit
 import threading
 
 import SoapySDR
@@ -28,6 +35,7 @@ from .rf import GAIN_MODES, TX_GAIN_MAX, device_args
 
 _devices = {}
 _lock = threading.Lock()
+_made = {}                                  # (device args, sink) -> source, set by connect()
 
 
 def device(args):
@@ -52,6 +60,26 @@ def connect(src, src_key, dst, dst_key):
         raise ValueError(f"GlideLink PL connection {source} -> {sink}: the blocks are on different "
                          f"boards ({src.pl_args!r}, {dst.pl_args!r})")
     route(device(dst.pl_args), sink, source)
+    with _lock:
+        _made[(dst.pl_args, sink)] = source
+
+
+def release():
+    """the connections made by connect() in this process back to none (those still as set)"""
+    from .control import SINKS, SOURCES, REG_ROUTE
+    with _lock:
+        made = list(_made.items())
+        _made.clear()
+    for (args, sink), source in made:
+        try:
+            dev = device(args)
+            if dev.readRegister("FPGA", REG_ROUTE + 4 * SINKS[sink]) == SOURCES[source]:
+                route(dev, sink, "none")
+        except Exception:                   # the board gone: nothing to release
+            pass
+
+
+atexit.register(release)
 
 
 def slot_ports(args, slot):
