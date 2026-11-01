@@ -114,6 +114,13 @@ Windows 中网卡的名称与对应关系可能改变；板子的地址（192.16
 - MathWorks ADALM-Pluto 支持包可以直连板子，但按 12 位换算样点：读数大 16 倍、发射小 16 倍；采样率下限见 2.4。
 - MathWorks 官方例程文件来自本机安装的支持包，不放进仓库（`glidelink.officialExample`）。
 
+- GNU Radio 的 QPSK 收发流程图（`ota_qpsk.grc`）把采样率提到 20 MSPS 时，电脑（i5-14600KF）上的块跟不上：FLL（`fll_band_edge`，
+  sps 4）单核约 16 MSPS，接收源持续溢出（控制台一直打 `sO`，是板上 DMA 因电脑读得慢而丢样点；USB 网口上没有丢包）；发射端调制链
+  有时也到不了 20 MSPS，发射板断供（`TX_UNDERFLOW` 计断供次数），空中信号时有时无。GNU Radio 每个块一个线程，落在能效核上的块更慢，
+  所以每次运行的速率不同。信号时有时无时，时钟同步（`pfb_clock_sync`，`max_dev` 1.5）的速率修正会跑到边界并卡住：它不再消耗输入，
+  接收源被堵住，频谱、星座图随之不动（离线插入静音段可复现）；它偶尔还会越界读输入，进程在 `volk.dll`（复数 × 实数点积）中访问违规退出。
+  后者是 GNU Radio 块自身的问题。原示例为 2.5 MSPS。
+
 ## 5. 尚未查明
 
 - 2026-10-30 接收板出现过一次读 AD9361 时 PL 中 SPI 控制器的总线错误（内核 `synchronous external abort`，之后对 AD9361 的访问全部挂起，
