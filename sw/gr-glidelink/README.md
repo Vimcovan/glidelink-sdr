@@ -48,10 +48,24 @@ cmake -S . -B build && cmake --build build && sudo cmake --install build
 
 块装到 `/usr/local/share/gnuradio/grc/blocks`，GRC 默认能找到。Soapy 模块（`sw/soapy-glidelink`）需在同一台机器上装好。
 
+## 安装（Windows，radioconda）
+
+radioconda 中没有 CMake；这些块是纯 Python，用 radioconda 自己的 Python 运行安装脚本，把文件复制到它的 GNU Radio 中：
+
+```bat
+D:\radioconda\python.exe sw\gr-glidelink\install_conda.py
+```
+
+Soapy 模块的 Windows 版见 `sw/soapy-glidelink/README.md`。radioconda 没有 OpenCV，视频块（Video File Source 等）用不了，其余块都可用。
+
 ## 示例
 
 `examples/ota_qpsk.grc`：发射板（GlideLink Sink）发 QPSK，接收板（GlideLink Source）收，经 AGC、FLL 频偏校正、多相时钟同步、
 Costas 环后显示星座；频谱、瀑布图；滑块改发射衰减和接收增益。915 MHz、2.5 MSPS。
+
+`examples/rate_50msps.grc`：发射板发两个单音加噪声、接收板收，都是 50 MSPS 经 USB 网口（板上 UDP 流服务），
+显示接收板的整个 50 MHz 频谱，每秒打印两路实际速率。要在 Windows 原生的 GNU Radio（radioconda）中运行；WSL 中发射约 48 MSPS。
+2026-11-01 实测两路都稳定在 50.0 MSPS（`docs/img/win_rate_50msps.png`）。
 
 `examples/pl_fft_spectrum.grc`：全部在 PL 内的一条链，在 GRC 中用橙色连线画出：射频接收 → NCO（PL）→ FFT（PL，RFNoC FFT 块的核心）
 → 主机端口 1，电脑上只显示频谱。PL 按 20 MSPS 全速率计算 1024 点 FFT，每 KEEP 帧送一帧到电脑（KEEP = 40 时电脑只收 0.5 MSPS）；

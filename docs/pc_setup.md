@@ -119,7 +119,8 @@ wsl -u root xfce-desktop 1920x1080
 
 2. 放入 GlideLink 的 Soapy 模块：`glidelinkSupport.dll` 复制到 `D:\radioconda\Library\lib\SoapySDR\modules0.8`
    （自己编译见 `sw/soapy-glidelink/README.md` 的 Windows 一节）。
-3. 在 radioconda 的命令行（开始菜单 "radioconda Prompt"）中：
+3. 装 gr-glidelink（GRC 中的 GlideLink 块）：`D:\radioconda\python.exe sw\gr-glidelink\install_conda.py`。
+4. 在 radioconda 的命令行（开始菜单 "radioconda Prompt"）中：
 
    ```bat
    SoapySDRUtil --probe="driver=glidelink,uri=ip:192.168.4.1"
@@ -127,4 +128,7 @@ wsl -u root xfce-desktop 1920x1080
    ```
 
 网络不用设置：板子声明巨型帧后 Windows 自动把这两块网卡的 MTU 设为 9000，Soapy 模块在 Windows 上默认用 8000 字节的 UDP 包。
+GNU Radio Companion 从开始菜单的 radioconda 文件夹启动；示例 `sw/gr-glidelink/examples/rate_50msps.grc` 两块板各一路 50 MSPS。
+
+![两块板各一路 50 MSPS：接收板的 50 MHz 频谱，900 / 925 MHz 为发射板的两个单音](img/win_rate_50msps.png)
 

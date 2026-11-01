@@ -1,0 +1,244 @@
+options:
+  parameters:
+    author: GlideLink
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    description: 'TX board -> air -> RX board at 50 MSPS through the USB network links (glidelink-streamd
+      UDP streams): two tones and noise sent, the full 50 MHz received and shown; the measured rates
+      are printed every second. For native Windows GNU Radio (radioconda); in WSL the TX rate stays
+      near 48 MSPS (docs/known_issues.md 1.3).'
+    generate_options: qt_gui
+    id: glidelink_rate_50msps
+    output_language: python
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    title: GlideLink 50 MSPS
+    window_size: (1400,900)
+  states:
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: samp_rate
+  id: variable
+  parameters:
+    comment: ''
+    value: 50e6
+  states:
+    coordinate: [200, 8]
+    rotation: 0
+    state: enabled
+- name: freq
+  id: variable
+  parameters:
+    comment: ''
+    value: 915e6
+  states:
+    coordinate: [300, 8]
+    rotation: 0
+    state: enabled
+- name: tx_atten
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 0,0,1,1
+    label: TX attenuation (dB)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0'
+    step: '1'
+    stop: '89'
+    value: '40'
+    widget: counter_slider
+  states:
+    coordinate: [400, 8]
+    rotation: 0
+    state: enabled
+- name: rx_gain
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: 0,1,1,1
+    label: RX gain (dB)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0'
+    step: '1'
+    stop: '70'
+    value: '30'
+    widget: counter_slider
+  states:
+    coordinate: [560, 8]
+    rotation: 0
+    state: enabled
+- name: tone1
+  id: analog_sig_source_x
+  parameters:
+    amp: '0.3'
+    comment: ''
+    freq: 10e6
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    offset: '0'
+    phase: '0'
+    samp_rate: samp_rate
+    type: complex
+    waveform: analog.GR_COS_WAVE
+  states:
+    coordinate: [16, 120]
+    rotation: 0
+    state: enabled
+- name: tone2
+  id: analog_sig_source_x
+  parameters:
+    amp: '0.2'
+    comment: ''
+    freq: -15e6
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    offset: '0'
+    phase: '0'
+    samp_rate: samp_rate
+    type: complex
+    waveform: analog.GR_COS_WAVE
+  states:
+    coordinate: [16, 260]
+    rotation: 0
+    state: enabled
+- name: noise
+  id: analog_noise_source_x
+  parameters:
+    amp: '0.02'
+    comment: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    noise_type: analog.GR_GAUSSIAN
+    seed: '0'
+    type: complex
+  states:
+    coordinate: [16, 400]
+    rotation: 0
+    state: enabled
+- name: add
+  id: blocks_add_xx
+  parameters:
+    comment: ''
+    num_inputs: '3'
+    type: complex
+    vlen: '1'
+  states:
+    coordinate: [240, 260]
+    rotation: 0
+    state: enabled
+- name: tx
+  id: glidelink_sink
+  parameters:
+    address: '192.168.4.1'
+    atten: tx_atten
+    bandwidth: '0'
+    comment: TX board
+    freq: freq
+    samp_rate: samp_rate
+  states:
+    coordinate: [400, 240]
+    rotation: 0
+    state: enabled
+- name: tx_rate
+  id: blocks_probe_rate
+  parameters:
+    alpha: '0.15'
+    comment: ''
+    mintime: '1000.0'
+    type: complex
+    vlen: '1'
+  states:
+    coordinate: [400, 340]
+    rotation: 0
+    state: enabled
+- name: rx
+  id: glidelink_source
+  parameters:
+    address: '192.168.3.1'
+    bandwidth: '0'
+    comment: RX board
+    freq: freq
+    gain: rx_gain
+    gain_mode: '"manual"'
+    samp_rate: samp_rate
+  states:
+    coordinate: [16, 540]
+    rotation: 0
+    state: enabled
+- name: rx_rate
+  id: blocks_probe_rate
+  parameters:
+    alpha: '0.15'
+    comment: ''
+    mintime: '1000.0'
+    type: complex
+    vlen: '1'
+  states:
+    coordinate: [300, 640]
+    rotation: 0
+    state: enabled
+- name: rates
+  id: blocks_message_debug
+  parameters:
+    comment: prints the rates (samples per second)
+    en_uvec: 'True'
+    log_level: info
+  states:
+    coordinate: [560, 600]
+    rotation: 0
+    state: enabled
+- name: spectrum
+  id: qtgui_freq_sink_x
+  parameters:
+    average: '0.2'
+    axislabels: 'True'
+    bw: samp_rate
+    comment: ''
+    ctrlpanel: 'False'
+    fc: freq
+    fftsize: '4096'
+    grid: 'True'
+    gui_hint: 1,0,6,2
+    label: Relative Gain
+    legend: 'False'
+    name: '"RX board, 50 MSPS"'
+    nconnections: '1'
+    norm_window: 'False'
+    showports: 'False'
+    tr_chan: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_tag: '""'
+    type: complex
+    units: dB
+    update_time: '0.10'
+    wintype: window.WIN_BLACKMAN_hARRIS
+    ymax: '0'
+    ymin: '-120'
+  states:
+    coordinate: [300, 520]
+    rotation: 0
+    state: enabled
+
+connections:
+- [tone1, '0', add, '0']
+- [tone2, '0', add, '1']
+- [noise, '0', add, '2']
+- [add, '0', tx, '0']
+- [add, '0', tx_rate, '0']
+- [rx, '0', spectrum, '0']
+- [rx, '0', rx_rate, '0']
+- [tx_rate, rate, rates, print]
+- [rx_rate, rate, rates, print]
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2
