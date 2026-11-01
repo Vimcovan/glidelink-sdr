@@ -1,0 +1,39 @@
+# GlideLink user module (docs/module_guide.md)
+id: costas
+name: Costas loop
+rtl: glidelink_costas.v
+top: glidelink_costas
+model: model.py
+id_value: 0x434F5331          # "COS1": the ID register, by which the PL block finds the slot
+version: 1.0.0
+data:
+  input: sc16, 1 sample per symbol (QPSK)
+  output: sc16
+  tuser: passed with its sample
+function: >-
+  As GNU Radio's costas_loop_cc of order 4, in fixed point, one sample at a time: y = x
+  exp(-j phase) (4096-point table), error sign(yI) yQ - sign(yQ) yI within +-1.0, second-order
+  loop (ALPHA, BETA), frequency within +-FREQ_MAX (model.py). Up to 33 MSPS at 200 MHz
+  (6 clock cycles per sample).
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
+  - name: CONTROL
+    fields:
+      - {name: enable, bits: 0, doc: "1 = Costas loop, 0 = pass unchanged"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "phase 0, frequency = FREQ as written"}
+  - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: ALPHA, width: 27, doc: "phase gain, alpha 2^33 / (2 pi)"}
+  - {name: BETA, width: 27, doc: "frequency gain, beta 2^33 / (2 pi)"}
+  - {name: FREQ_MAX, width: 32, default: 683565275, doc: "frequency limit, 2^32 per cycle per sample (1 rad)"}
+  - {name: FREQ, strobe: true, readback: true, doc: "write: frequency now (and after a reset); read: frequency now (signed)"}
+  - {name: PHASE, access: ro, doc: "phase now, 2^32 per cycle"}
+block:                        # the GNU Radio blocks (PL and software), same parameters
+  doc: >-
+    Costas loop for QPSK, as GNU Radio's Costas Loop of order 4 (costas_loop_cc), in fixed point.
+  params:
+    - {name: w, label: Loop bandwidth, type: real, default: 0.0314, check: "0 < w < 1",
+       write: {ALPHA: "model.loop_gains(w)[0]", BETA: "model.loop_gains(w)[1]"},
+       doc: "rad per sample, as GNU Radio (6.28 / 200)"}
+  start: {CONTROL: 1}
+tests:                        # python glidelink.py test costas: block parameters per case
+  - {}
+  - {w: 0.2}

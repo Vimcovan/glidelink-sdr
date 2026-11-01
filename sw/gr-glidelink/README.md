@@ -75,6 +75,13 @@ Costas 环后显示星座；频谱、瀑布图；滑块改发射衰减和接收�
 FLL 与时钟同步固定在性能核上（变量 `pcores`，按本机 CPU 填）。2026-11-01 实测两次各 3 分钟：电脑收 10.0、发 5.0 MSPS，没有溢出，
 星座稳定（`docs/img/ota_qpsk_pl.png`）。原流程图直接改到 20 MSPS 时电脑跟不上，见 `docs/known_issues.md` 第 4 节。
 
+`examples/ota_qpsk_plrx.grc`：接收机整个在 PL 中（`qpsk` 镜像的槽位 1～6）：低通与 2 倍抽取、AGC、FLL 带边、RRC 匹配滤波、
+符号同步（Gardner）、Costas 环，电脑只收每符号 1 个样点（5 MSPS），不再需要性能核。窗口每秒读一次 PL 中的 FLL 频率、符号同步的
+NCO 步长（含比例支路的逐符号噪声，读数跳动大）与 Costas 频率。2026-11-01 实测 3 分钟：电脑收 5.0、发 5.0 MSPS，没有溢出，
+符号 EVM 约 −19.7 dB（`docs/img/ota_qpsk_plrx.png`）。FLL 读数约 +77 kHz、Costas 约 +76 kHz，两者相抵：两板实际频偏约 1 kHz，
+带边 FLL 的平衡点被接收频谱约 −0.3 dB/MHz 的倾斜推开（GNU Radio 的 FLL 在同样的信号上相同，见 `docs/known_issues.md` 第 4 节），
+其余由 Costas 环跟上。
+
 `examples/rate_50msps.grc`：发射板发两个单音加噪声、接收板收，都是 50 MSPS 经 USB 网口（板上 UDP 流服务），
 显示接收板的整个 50 MHz 频谱，每秒打印两路实际速率。要在 Windows 原生的 GNU Radio（radioconda）中运行；WSL 中发射约 48 MSPS。
 2026-11-01 实测两路都稳定在 50.0 MSPS（`docs/img/win_rate_50msps.png`）。

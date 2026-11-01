@@ -1,0 +1,46 @@
+# GlideLink user module (docs/module_guide.md)
+id: symsync
+name: Symbol sync (Gardner)
+rtl: glidelink_symsync.v
+top: glidelink_symsync
+model: model.py
+id_value: 0x53594D31          # "SYM1": the ID register, by which the PL block finds the slot
+version: 1.0.0
+data:
+  input: sc16, 2 samples per symbol, matched-filtered
+  output: sc16, 1 sample per symbol
+  tuser: >-
+    an output carries the tuser of the first packet start and any tlast among the input
+    samples since the previous output
+function: >-
+  Timing recovery (M. Rice, ch. 8): modulo-1 NCO, piecewise parabolic Farrow interpolator,
+  Gardner timing error detector, PI loop filter; one output per symbol (model.py). Up to
+  25 MSPS in at 200 MHz (8 clock cycles per sample).
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
+  - name: CONTROL
+    fields:
+      - {name: enable, bits: 0, doc: "1 = timing recovery, 0 = pass unchanged (2 samples per symbol)"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "loop and history cleared, W = W0"}
+  - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: W0, width: 25, default: 8388608, doc: "nominal NCO step, 1.0 = 2^24 (0.5: 2 samples per symbol)"}
+  - {name: MAX_DEV, width: 24, default: 83886, doc: "W kept within W0 +- MAX_DEV (1 % of 0.5)"}
+  - {name: KP, width: 24, doc: "proportional gain x 2^24 (signed)"}
+  - {name: KI, width: 24, doc: "integral gain x 2^24 (signed)"}
+  - {name: W, access: ro, width: 25, doc: "NCO step now"}
+block:                        # the GNU Radio blocks (PL and software), same parameters
+  doc: >-
+    Symbol timing recovery for 2 samples per symbol of a matched-filtered signal: Farrow
+    interpolator, Gardner detector, PI loop; one output sample per symbol.
+  params:
+    - {name: loop_bw, label: Loop bandwidth (BnT), type: real, default: 0.01, check: "0 < loop_bw < 0.5",
+       write: {KP: "model.gains(loop_bw, damping, ted_gain)[0]", KI: "model.gains(loop_bw, damping, ted_gain)[1]"},
+       doc: "noise bandwidth x symbol time"}
+    - {name: damping, label: Damping, type: real, default: 0.707, check: "0 < damping"}
+    - {name: ted_gain, label: TED gain, type: real, default: 0.3, check: "ted_gain != 0",
+       doc: "slope of the Gardner detector per symbol fraction (output / 2^30): about 0.3 at rms 0.5"}
+    - {name: max_dev, label: Max deviation, type: real, default: 0.01, check: "0 < max_dev < 0.5",
+       write: {MAX_DEV: "max_dev * 2**23"}, doc: "of the nominal rate"}
+  start: {CONTROL: 1}
+tests:                        # python glidelink.py test symsync: block parameters per case
+  - {}
+  - {loop_bw: 0.05, damping: 1.0, max_dev: 0.05}

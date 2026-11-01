@@ -1,0 +1,54 @@
+# GlideLink user module (docs/module_guide.md)
+id: fll
+name: FLL band-edge
+rtl: glidelink_fll.v
+top: glidelink_fll
+model: model.py
+id_value: 0x464C4C31          # "FLL1": the ID register, by which the PL block finds the slot
+version: 1.0.0
+parameters:
+  TAPS: 48                    # band-edge filter length at most (GNU Radio's filter_size)
+data:
+  input: sc16                 # {Q[31:16], I[15:0]}
+  output: sc16
+  tuser: passed with its sample
+function: >-
+  As GNU Radio's fll_band_edge_cc, in fixed point, one sample at a time (model.py): the input
+  turned by the loop's NCO, band-edge filters P +- jQ over the outputs, error -4 Im(P conj Q),
+  second-order loop (ALPHA, BETA), frequency within +-FREQ_MAX. Up to 14 MSPS at 200 MHz
+  (14 clock cycles per sample).
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
+  - name: CONTROL
+    fields:
+      - {name: enable, bits: 0, doc: "1 = FLL, 0 = pass unchanged"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "history cleared, phase 0, frequency = FREQ as written"}
+      - {name: load, bits: 2, access: pulse, doc: "shadow coefficients become active"}
+  - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: TAPS, access: ro, value: TAPS, doc: "filter length at most"}
+  - {name: TAP_SHIFT, width: 5, default: 16, doc: "coefficients are x 2^TAP_SHIFT"}
+  - {name: ALPHA, width: 24, doc: "phase gain, 2 alpha / pi 2^24"}
+  - {name: BETA, width: 24, doc: "frequency gain, 2 beta / pi 2^24"}
+  - {name: FREQ_MAX, width: 32, default: 683565275, doc: "frequency limit, 2^32 per cycle per sample"}
+  - {name: FREQ, strobe: true, readback: true, doc: "write: frequency now (and after a reset); read: frequency now (signed)"}
+  - {name: PHASE, access: ro, doc: "NCO phase now, 2^32 per cycle"}
+  - {name: COEF_ADDR, width: 8, strobe: true, readback: true, doc: "shadow index of the next COEF_DATA access"}
+  - {name: COEF_DATA, width: 16, signed: true, strobe: true, readback: true,
+     doc: "shadow coefficient at COEF_ADDR (2k = c_k, 2k + 1 = s_k); a write moves COEF_ADDR on by one"}
+block:                        # the GNU Radio blocks (PL and software), same parameters
+  doc: >-
+    Frequency lock loop on the band edges, as GNU Radio's FLL Band-Edge (fll_band_edge_cc), in fixed
+    point. Output: the input turned by the loop's estimate of its frequency offset.
+  params:
+    - {name: sps, label: Samples per symbol, type: real, default: 2.0, check: "1 < sps <= 16",
+       write: [[COEF_ADDR, 0], [COEF_DATA, "pad(model.design(sps, rolloff, filter_size)[0], 2 * read('TAPS'))"],
+               [TAP_SHIFT, "model.design(sps, rolloff, filter_size)[1]"], [FREQ_MAX, "model.freq_max(sps)"],
+               [CONTROL, 5]]}
+    - {name: rolloff, label: Filter rolloff, type: real, default: 0.35, check: "0 < rolloff <= 1"}
+    - {name: filter_size, label: Prototype filter size, type: int, default: 44, check: "2 <= filter_size <= read('TAPS')"}
+    - {name: w, label: Loop bandwidth, type: real, default: 0.0157, check: "0 < w < 1",
+       write: {ALPHA: "model.loop_gains(w)[0]", BETA: "model.loop_gains(w)[1]"}, doc: "rad per sample, as GNU Radio (6.28 / 400)"}
+  start: {CONTROL: 1}
+tests:                        # python glidelink.py test fll: block parameters per case
+  - {}
+  - {sps: 4.0, filter_size: 44, w: 0.05}
+  - {sps: 2.0, rolloff: 0.5, filter_size: 31, w: 0.1}

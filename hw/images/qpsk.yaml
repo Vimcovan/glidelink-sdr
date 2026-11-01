@@ -1,8 +1,14 @@
-# QPSK over the air with the heavy filtering in the PL (sw/gr-glidelink/examples/ota_qpsk_pl.grc):
-# on the TX board the FIR interpolates the symbols by 4 with an RRC pulse, on the RX board it
-# low-passes and decimates by 2; the NCO is there for a frequency shift.
+# QPSK over the air with the receiver in the PL (sw/gr-glidelink/examples/ota_qpsk_pl.grc), the same
+# image on both boards: on the TX board the FIR in slot 1 interpolates the symbols by 4 with an RRC
+# pulse; on the RX board slot 1 low-passes and decimates by 2, then AGC, FLL, the matched filter
+# (FIR in slot 4), symbol sync and Costas loop, so the PC gets one sample per symbol.
 name: qpsk
 slots:
   - {module: passthrough}         # slot 0
   - {module: fir, params: {TAPS: 64}}
-  - {module: nco}                 # slot 2
+  - {module: agc}                 # slot 2
+  - {module: fll}                 # slot 3
+  - {module: fir, params: {TAPS: 64}}
+  - {module: symsync}             # slot 5
+  - {module: costas}              # slot 6
+  - {module: nco}                 # slot 7

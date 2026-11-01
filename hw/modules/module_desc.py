@@ -229,7 +229,9 @@ class Program:
             raise ValueError(f"{p['name']} = {self.values[p['name']]!r}: needs {c}")
 
     def start(self, values):
-        self.values = dict(values)
+        """all parameters' writes, then start; parameters not given take their default"""
+        self.values = {p["name"]: p.get("default", 0) for p in self.params}
+        self.values.update(values)
         for p, ws, _ in self.entries:
             self._check(p)
             self._run(ws)

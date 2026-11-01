@@ -1,0 +1,46 @@
+# GlideLink user module (docs/module_guide.md)
+id: agc
+name: AGC
+rtl: glidelink_agc.v
+top: glidelink_agc
+model: model.py
+id_value: 0x41474331          # "AGC1": the ID register, by which the PL block finds the slot
+version: 1.0.0
+data:
+  input: sc16                 # {Q[31:16], I[15:0]}
+  output: sc16
+  tuser: passed with its sample
+function: >-
+  As GNU Radio's agc_cc, in fixed point, one sample at a time: y = sat16((x * g + 2^15) >> 16)
+  on I and Q (g: 1.0 = 65536), then m = max(|yI|, |yQ|) + (3 min(|yI|, |yQ|) >> 3) (magnitude,
+  within 7 %), g += (2 (REFERENCE - m)) >> RATE_SHIFT (arithmetic shift), g kept within
+  0 .. MAX_GAIN. Disabled: samples pass unchanged, the gain holds. Up to 50 MSPS at 200 MHz
+  (4 clock cycles per sample).
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on; ports: docs/module_guide.md
+  - name: CONTROL
+    fields:
+      - {name: enable, bits: 0, doc: "1 = AGC, 0 = pass unchanged"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "pipeline emptied, gain = GAIN as written"}
+  - {name: REFERENCE, width: 16, default: 16384, doc: "output magnitude aimed at, 1.0 = 32768"}
+  - {name: RATE_SHIFT, width: 5, default: 10, doc: "gain update rate 2^-RATE_SHIFT"}
+  - {name: MAX_GAIN, width: 26, default: 67108863, doc: "gain limit, 1.0 = 65536 (at most 1024)"}
+  - {name: GAIN, width: 26, strobe: true, readback: true, default: 65536,
+     doc: "write: gain now (and after a reset); read: gain now"}
+block:                        # the GNU Radio blocks (PL and software), same parameters
+  doc: >-
+    AGC as GNU Radio's AGC (agc_cc): output = input x gain, gain += rate x (reference - |output|),
+    in fixed point; rate rounded to a power of two, magnitude approximated within 7 %.
+  params:
+    - {name: rate, label: Rate, type: real, default: 1.0e-3, check: "1e-9 < rate <= 0.5",
+       write: {RATE_SHIFT: "round(-math.log2(rate))"}, doc: "gain update rate, rounded to 2^-n"}
+    - {name: reference, label: Reference, type: real, default: 0.5, check: "0 < reference < 1",
+       write: {REFERENCE: "reference * 32768"}, doc: "output magnitude, full scale 1.0"}
+    - {name: gain, label: Initial gain, type: real, default: 1.0, check: "0 <= gain < 1024",
+       write: {GAIN: "gain * 65536"}}
+    - {name: max_gain, label: Max gain, type: real, default: 1000.0, check: "0 < max_gain < 1024",
+       write: {MAX_GAIN: "max_gain * 65536"}}
+  start: {CONTROL: 1}
+tests:                        # python glidelink.py test agc: block parameters per case
+  - {}
+  - {rate: 0.01, reference: 0.3, gain: 20.0, max_gain: 100.0}
+  - {rate: 0.25, reference: 0.9, gain: 0.0, max_gain: 1023.0}
