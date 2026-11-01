@@ -16,7 +16,9 @@ data:
 function: >-
   y[n] = sum h[k] x[n-k] on I and Q (real coefficients, 40-bit accumulation), then
   (y + 2^(SHIFT-1)) >> SHIFT saturated to 16 bits. The delay line runs on across
-  packets; disabled samples pass unchanged and do not enter it.
+  packets; disabled samples pass unchanged and do not enter it. With INTERP = L the
+  input is zero-stuffed by L before the filter, with DECIM = M one output in every M
+  goes out (the phase runs on across packets).
 registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on
   - name: CONTROL
     fields:
@@ -29,17 +31,26 @@ registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on
   - {name: COEF_ADDR, width: 8, strobe: true, readback: true, doc: "shadow index of the next COEF_DATA access"}
   - {name: COEF_DATA, width: 16, signed: true, strobe: true, readback: true,
      doc: "shadow coefficient at COEF_ADDR; a write moves COEF_ADDR on by one"}
+  - {name: INTERP, width: 5, default: 1, doc: "interpolation L: L - 1 zeros after each input sample (0, 1 = none)"}
+  - {name: DECIM, width: 5, default: 1, doc: "decimation M: one output in every M (0, 1 = none)"}
 block:
-  doc: FIR filter with integer coefficients (signed 16 bit, up to TAPS = 32) on I and Q, then a rounding right shift.
+  doc: FIR filter with integer coefficients (signed 16 bit, up to TAPS, 32 by default) on I and Q, then a rounding right shift; optional interpolation (zero-stuffing) before and decimation after it.
   params:
     - {name: taps, label: Coefficients, type: int_vector, default: [32767],
        write: [[COEF_ADDR, 0], [COEF_DATA, "pad(taps, read('TAPS'))"], [CONTROL, 5]],
        doc: "signed 16 bit, up to 32 (missing ones are 0); loaded together, the filter enabled"}
     - {name: shift, label: Output shift, type: int, default: 15, check: "0 <= shift <= 31",
        write: {SHIFT: shift}, doc: "y rounded and shifted right by this many bits"}
+    - {name: interp, label: Interpolation, type: int, default: 1, check: "1 <= interp <= 31",
+       write: {INTERP: interp}, doc: "L - 1 zeros after each input sample (the coefficients carry the gain L)"}
+    - {name: decim, label: Decimation, type: int, default: 1, check: "1 <= decim <= 31",
+       write: {DECIM: decim}, doc: "one output in every M"}
 tests:                        # in block parameters (hw/scripts/glidelink.py test)
   - {taps: [-32768, 1200, -900, 4000, 77, 32767, -5, 3, 12345], shift: 14}
   - {taps: [2, -1, 0, 1, 2, -2, -1], shift: 0}
+  - {taps: [1200, -3000, 9000, 20000, 9000, -3000, 1200, 500, -700], shift: 15, interp: 4}
+  - {taps: [1200, -3000, 9000, 20000, 9000, -3000, 1200, 500, -700], shift: 15, decim: 3}
+  - {taps: [-900, 4000, 30000, 4000, -900], shift: 15, interp: 3, decim: 2}
 resources:                    # in the shell, xczu5eg, Vivado 2025.2
   lut: 712
   ff: 843

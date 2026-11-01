@@ -8,7 +8,13 @@
 // from the shell does), CONTROL.load (shadow coefficients become the active
 // ones), STATUS.enabled, TAPS, SHIFT (output right shift, 0..31, default 15),
 // COEF_ADDR (shadow index of the next COEF_DATA access), COEF_DATA (shadow
-// coefficient at COEF_ADDR; a write also moves COEF_ADDR on by one).
+// coefficient at COEF_ADDR; a write also moves COEF_ADDR on by one), INTERP
+// and DECIM (rate change L and M, 0 or 1 = none; enabled only).
+// Interpolation: each input sample enters the filter followed by L - 1 zeros
+// (tuser stays on the first, tlast moves to the last). Decimation: one filter
+// output in every M goes out, the phase running on across packets; it carries
+// the tuser of the first packet start and any tlast among the M samples it
+// stands for (packets shorter than M lose their start).
 // y[n] = sum h[k] x[n-k] (transposed form, 40-bit accumulation), then
 // (y + 2^(SHIFT-1)) >> SHIFT saturated to 16 bits. The delay line advances
 // on valid samples only and runs on across packets. Pipeline of 5 stages,
@@ -29,6 +35,8 @@ module glidelink_fir #(
   input             load,
   output            enabled,
   input      [4:0]  shift,
+  input      [4:0]  interp,
+  input      [4:0]  decim,
   input      [7:0]  coef_addr,              // COEF_ADDR as written
   input             coef_addr_wr,
   output     [7:0]  coef_addr_rd,
@@ -90,9 +98,28 @@ module glidelink_fir #(
 
   wire        rst = !rstn || soft_reset || flush;
   reg   [4:0] v = 5'd0;
-  wire        ce = !v[4] || m_axis_tready;
+  wire  [4:0] L = (!enable || interp < 5'd2) ? 5'd1 : interp;
+  wire  [4:0] M = (!enable || decim < 5'd2) ? 5'd1 : decim;
 
-  assign s_axis_tready = ce;
+  // interpolation: a new input sample at up_cnt = 0, then L - 1 zeros
+  reg   [4:0] up_cnt = 5'd0;
+  reg         up_last = 1'b0;               // tlast of the sample being interpolated
+  wire        up_new = up_cnt == 5'd0;
+  wire        a_valid = up_new ? s_axis_tvalid : 1'b1;
+  wire        a_last = L == 5'd1 ? s_axis_tlast : (up_cnt == L - 5'd1 && up_last);
+  wire [71:0] a_user = up_new ? s_axis_tuser : 72'd0;
+  wire [31:0] a_data = up_new ? s_axis_tdata : 32'd0;
+
+  // decimation: the stage-E sample goes out when keep, else it is dropped
+  reg   [4:0] dec_cnt = 5'd0;
+  reg         w_first = 1'b0;               // a packet start among the dropped samples
+  reg  [71:0] w_user = 72'd0;
+  reg         w_last = 1'b0;                // a packet end among them
+  reg         e_first = 1'b1;               // the stage-E sample starts a packet
+  wire        keep = dec_cnt >= M - 5'd1;
+  wire        ce = !v[4] || !keep || m_axis_tready;
+
+  assign s_axis_tready = ce && up_new;
 
   reg  [104:0] side [0:4];                  // {last, user, data}
   reg   [4:0] byp = 5'd0;
@@ -102,13 +129,49 @@ module glidelink_fir #(
     if (rst)
       v <= 5'd0;
     else if (ce)
-      v <= {v[3:0], s_axis_tvalid};
+      v <= {v[3:0], a_valid};
     if (ce) begin
-      side[0] <= {s_axis_tlast, s_axis_tuser, s_axis_tdata};
+      side[0] <= {a_last, a_user, a_data};
       byp[0] <= !enable;
       for (j = 1; j < 5; j = j + 1) begin
         side[j] <= side[j - 1];
         byp[j] <= byp[j - 1];
+      end
+    end
+  end
+
+  always @(posedge clk) begin
+    if (rst) begin
+      up_cnt <= 5'd0;
+    end else if (ce && a_valid) begin
+      if (up_new)
+        up_last <= s_axis_tlast;
+      up_cnt <= up_cnt >= L - 5'd1 ? 5'd0 : up_cnt + 5'd1;
+    end
+  end
+
+  wire [71:0] e_user = side[4][103:32];
+  wire        e_last = side[4][104];
+
+  always @(posedge clk) begin
+    if (rst) begin
+      dec_cnt <= 5'd0;
+      w_first <= 1'b0;
+      w_last <= 1'b0;
+      e_first <= 1'b1;
+    end else if (v[4] && ce) begin          // the stage-E sample leaves: out or dropped
+      e_first <= e_last;
+      if (keep) begin
+        dec_cnt <= 5'd0;
+        w_first <= 1'b0;
+        w_last <= 1'b0;
+      end else begin
+        dec_cnt <= dec_cnt + 5'd1;
+        if (e_first && !w_first) begin
+          w_first <= 1'b1;
+          w_user <= e_user;
+        end
+        w_last <= w_last || e_last;
       end
     end
   end
@@ -175,9 +238,9 @@ module glidelink_fir #(
     end
   end
 
-  assign m_axis_tvalid = v[4];
+  assign m_axis_tvalid = v[4] && keep;
   assign m_axis_tdata = out_e;
-  assign m_axis_tuser = side[4][103:32];
-  assign m_axis_tlast = side[4][104];
+  assign m_axis_tuser = M == 5'd1 ? e_user : w_first ? w_user : e_first ? e_user : 72'd0;
+  assign m_axis_tlast = w_last || e_last;
 
 endmodule

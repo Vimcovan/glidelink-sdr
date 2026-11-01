@@ -51,6 +51,7 @@ class Model(module_desc.RegisterModel):
         self.h = [0] * self.n
         self.caddr = 0
         self.hist = np.zeros(self.n - 1, np.uint32)          # the delay line (enabled samples)
+        self.dec = 0                                         # decimation phase
 
     def on_write(self, name, value):
         if name == "COEF_ADDR":
@@ -62,6 +63,7 @@ class Model(module_desc.RegisterModel):
         elif name == "CONTROL":
             if value & 2:
                 self.hist[:] = 0
+                self.dec = 0
             if value & 4:
                 self.h = list(self.shadow)
 
@@ -78,11 +80,20 @@ class Model(module_desc.RegisterModel):
         words = np.asarray(words, np.uint32)
         if not self.field("CONTROL", "enable"):
             return words.copy()
+        L, M = max(self.regs["INTERP"], 1), max(self.regs["DECIM"], 1)
+        if L > 1:                                           # L - 1 zeros after each sample
+            up = np.zeros(len(words) * L, np.uint32)
+            up[::L] = words
+            words = up
         x = np.concatenate([self.hist, words])
         i, q = unpack(x)
         shift = self.regs["SHIFT"]
         out = pack(filt(i, self.h, shift), filt(q, self.h, shift))[len(self.hist):]
         self.hist = x[len(x) - len(self.hist):]
+        if M > 1:                                           # one in every M, phase kept
+            keep = (self.dec + np.arange(len(out))) % M == M - 1
+            self.dec = (self.dec + len(out)) % M
+            out = out[keep]
         return out
 
 

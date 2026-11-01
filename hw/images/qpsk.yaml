@@ -1,0 +1,8 @@
+# QPSK over the air with the heavy filtering in the PL (sw/gr-glidelink/examples/ota_qpsk_pl.grc):
+# on the TX board the FIR interpolates the symbols by 4 with an RRC pulse, on the RX board it
+# low-passes and decimates by 2; the NCO is there for a frequency shift.
+name: qpsk
+slots:
+  - {module: passthrough}         # slot 0
+  - {module: fir, params: {TAPS: 64}}
+  - {module: nco}                 # slot 2

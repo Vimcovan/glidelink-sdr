@@ -70,6 +70,11 @@ Soapy 模块的 Windows 版见 `sw/soapy-glidelink/README.md`。radioconda 没�
 `examples/ota_qpsk.grc`：发射板（GlideLink Sink）发 QPSK，接收板（GlideLink Source）收，经 AGC、FLL 频偏校正、多相时钟同步、
 Costas 环后显示星座；频谱、瀑布图；滑块改发射衰减和接收增益。915 MHz、2.5 MSPS。
 
+`examples/ota_qpsk_pl.grc`：同样的 QPSK 链路在 20 MSPS（5 Msym/s），全速率的滤波放在 PL（两块板都用 `qpsk` 镜像）：
+发射板的 FIR 把电脑送来的符号 4 倍插值并做 RRC 成形，接收板的 FIR 低通后 2 倍抽取，电脑只发 5 MSPS、收 10 MSPS（每符号 2 个样点）。
+FLL 与时钟同步固定在性能核上（变量 `pcores`，按本机 CPU 填）。2026-11-01 实测两次各 3 分钟：电脑收 10.0、发 5.0 MSPS，没有溢出，
+星座稳定（`docs/img/ota_qpsk_pl.png`）。原流程图直接改到 20 MSPS 时电脑跟不上，见 `docs/known_issues.md` 第 4 节。
+
 `examples/rate_50msps.grc`：发射板发两个单音加噪声、接收板收，都是 50 MSPS 经 USB 网口（板上 UDP 流服务），
 显示接收板的整个 50 MHz 频谱，每秒打印两路实际速率。要在 Windows 原生的 GNU Radio（radioconda）中运行；WSL 中发射约 48 MSPS。
 2026-11-01 实测两路都稳定在 50.0 MSPS（`docs/img/win_rate_50msps.png`）。
