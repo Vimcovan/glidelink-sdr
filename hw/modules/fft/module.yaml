@@ -2,6 +2,7 @@
 id: fft
 name: FFT / IFFT (RFNoC FFT block core)
 rtl: glidelink_fft.sv
+bus: module                  # decodes AXI4-Lite itself (hw/modules/module_desc.py)
 top: glidelink_fft
 model: model.py
 source: >-
@@ -65,6 +66,54 @@ registers:
   - {name: BYPASS, offset: 0x144, access: rw, default: 0, doc: "1 = skip the FFT (CP removal / insertion, order and magnitude still apply)"}
   - {name: ORDER, offset: 0x148, access: rw, default: 0, doc: "0 normal (0 Hz centre), 1 reverse, 2 natural, 3 bit-reversed"}
   - {name: MAGNITUDE, offset: 0x14C, access: rw, default: 0, doc: "0 complex, 1 magnitude (approximate), 2 magnitude squared / 32768"}
+block:
+  doc: >-
+    FFT / IFFT, the core of the Ettus RFNoC FFT block (UHD, LGPL-3.0-or-later). Each output packet is one
+    FFT (plus the cyclic prefix when inserting).
+  params:
+    - {name: size, label: FFT size, type: int, default: 1024, check: "8 <= size <= 4096",
+       write: {LENGTH_LOG2: "log2(size)", SCALING: "model.default_scaling(log2(size)) if scaling < 0 else scaling"},
+       doc: "a power of two, 8 to 4096"}
+    - name: direction
+      label: Direction
+      type: enum
+      options: [[forward, Forward (FFT), 1], [inverse, Inverse (IFFT), 0]]
+      default: forward
+      write: {DIRECTION: direction}
+    - name: order
+      label: Output order
+      type: enum
+      options: [[normal, Normal (0 Hz centre), 0], [reverse, Reverse, 1], [natural, Natural (0 Hz first), 2],
+                [bit_reverse, Bit reversed, 3]]
+      default: normal
+      write: {ORDER: order}
+    - name: output
+      label: Output
+      type: enum
+      options: [[complex, Complex, 0], [magnitude, Magnitude, 1], [magnitude_squared, Magnitude squared, 2]]
+      default: complex
+      write: {MAGNITUDE: output}
+      doc: "magnitude (approximate, max + min/4) and magnitude squared / 32768 come in I, with Q = 0"
+    - {name: scaling, label: Scaling schedule (-1 = 1/N), type: int, default: -1,
+       write: {SCALING: "model.default_scaling(log2(size)) if scaling < 0 else scaling"},
+       doc: "-1 gives 1/N; any other value is the Xilinx FFT schedule, 2 bits per radix-4 stage"}
+    - {name: keep, label: Keep one in, type: int, default: 1, write: {KEEP: "max(keep, 1)"},
+       doc: "passes every K-th FFT: the spectrum of the full-rate signal at 1/K of the data rate to the host"}
+    - {name: cp_rem, label: CP removal list, type: int_vector, default: [],
+       write: [[CP_REM_LIST_CLR, 1], [[CP_REM_LEN, CP_REM_LIST_LOAD], "[(c, 1) for c in cp_rem]"]],
+       doc: "cyclic prefix lengths removed before successive FFTs, repeated"}
+    - {name: cp_ins, label: CP insertion list, type: int_vector, default: [],
+       write: [[CP_INS_LIST_CLR, 1], [[CP_INS_LEN, CP_INS_LIST_LOAD], "[(c, 1) for c in cp_ins]"]],
+       doc: "cyclic prefix lengths inserted after successive FFTs, repeated"}
+    - {name: bypass, label: Bypass FFT, type: bool, default: false, write: {BYPASS: bypass}}
+  start: {CONTROL: 1}
+exact: false                  # the model is floating point (the Xilinx FFT core): about 1 LSB
+tolerance: 4                  # LSB, python glidelink.py test (tb/run_sims.ps1 has the detailed cases)
+test_input_scale: 0.5         # full-scale complex noise overflows the scaled FFT stages (not modelled)
+tests:
+  - {size: 1024}
+  - {size: 256, order: natural, output: magnitude, keep: 3, cp_rem: [16]}
+  - {size: 64, output: magnitude_squared, cp_rem: [16, 8], cp_ins: [4]}
 resources:                    # in the shell, xczu5eg, Vivado 2025.2 (dsp image); the Xilinx FFT IP is
   lut: 6011                   # 3084 LUT, 5548 FF, 50 DSP, 1 + 11 BRAM of it
   ff: 8764

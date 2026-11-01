@@ -8,7 +8,8 @@ Real coefficients h[0..TAPS-1] (signed 16 bit) applied to I and Q separately:
 The delay line runs on across packets; a soft reset clears it. With
 CONTROL.enable = 0 the samples pass unchanged and do not enter the delay line.
 Coefficients are written to a shadow set (COEF_ADDR, then COEF_DATA with
-auto-increment) and take effect together on CONTROL.load.
+auto-increment) and take effect together on CONTROL.load. Model: the module at register level
+(the software GNU Radio block and the generic test drive it as they drive the PL module).
 
     python model.py vectors   writes tb/ vectors for the module testbench
 """
@@ -21,6 +22,7 @@ TAPS = 32
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from sc16 import pack, unpack, sat16  # noqa: E402
+import module_desc  # noqa: E402
 
 
 def filt(x, h, shift):
@@ -37,6 +39,51 @@ def process(words, h, shift, enable=True):
     assert len(h) == TAPS
     i, q = unpack(words)
     return pack(filt(i, h, shift), filt(q, h, shift))
+
+
+class Model(module_desc.RegisterModel):
+    """glidelink_fir at register level"""
+
+    def __init__(self, params=None):
+        super().__init__(module_desc.load("fir", os.path.dirname(HERE)), params)
+        self.n = int(self.params["TAPS"])
+        self.shadow = [0] * self.n
+        self.h = [0] * self.n
+        self.caddr = 0
+        self.hist = np.zeros(self.n - 1, np.uint32)          # the delay line (enabled samples)
+
+    def on_write(self, name, value):
+        if name == "COEF_ADDR":
+            self.caddr = value & 0xFF
+        elif name == "COEF_DATA":
+            if self.caddr < self.n:
+                self.shadow[self.caddr] = (value & 0xFFFF) - ((value & 0x8000) << 1)
+            self.caddr = (self.caddr + 1) & 0xFF
+        elif name == "CONTROL":
+            if value & 2:
+                self.hist[:] = 0
+            if value & 4:
+                self.h = list(self.shadow)
+
+    def on_read(self, name):
+        if name == "STATUS":
+            return self.field("CONTROL", "enable")
+        if name == "COEF_ADDR":
+            return self.caddr
+        if name == "COEF_DATA":
+            return self.shadow[self.caddr] if self.caddr < self.n else 0
+        return None
+
+    def process(self, words):
+        words = np.asarray(words, np.uint32)
+        if not self.field("CONTROL", "enable"):
+            return words.copy()
+        x = np.concatenate([self.hist, words])
+        i, q = unpack(x)
+        shift = self.regs["SHIFT"]
+        out = pack(filt(i, self.h, shift), filt(q, self.h, shift))[len(self.hist):]
+        self.hist = x[len(x) - len(self.hist):]
+        return out
 
 
 def coef_writes(h):

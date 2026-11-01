@@ -21,10 +21,15 @@ add_subdirectory(bindings)
 ########################################################################
 gr_python_install(FILES __init__.py rf.py video.py control.py host_port.py modules.py jscc.py pl.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink)
 
-# the user modules' reference models and descriptions (hw/modules), used by modules.py
-set(HW_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/../../../../hw/modules)
-install(FILES ${HW_MODULES}/sc16.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink/modules)
-foreach(m nco fir fft)
+# the user modules' reference models and descriptions (hw/modules), used by modules.py: every
+# module with a block section (hw/scripts/gen_module.py blocks)
+set(HW_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../hw)
+set(HW_MODULES ${HW_DIR}/modules)
+install(FILES ${HW_MODULES}/sc16.py ${HW_MODULES}/module_desc.py DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink/modules)
+execute_process(COMMAND ${PYTHON_EXECUTABLE} ${HW_DIR}/scripts/gen_module.py blocks
+                OUTPUT_VARIABLE GL_BLOCK_MODULES OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+string(REPLACE "\n" ";" GL_BLOCK_MODULES "${GL_BLOCK_MODULES}")
+foreach(m ${GL_BLOCK_MODULES})
     install(FILES ${HW_MODULES}/${m}/model.py ${HW_MODULES}/${m}/module.yaml
             DESTINATION ${GR_PYTHON_DIR}/gnuradio/glidelink/modules/${m})
 endforeach()

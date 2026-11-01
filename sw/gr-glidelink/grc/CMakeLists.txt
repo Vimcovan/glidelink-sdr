@@ -16,12 +16,6 @@ install(FILES
     glidelink_control.block.yml
     glidelink_host_source.block.yml
     glidelink_host_sink.block.yml
-    glidelink_nco_model.block.yml
-    glidelink_nco.block.yml
-    glidelink_fir_model.block.yml
-    glidelink_fir.block.yml
-    glidelink_fft_model.block.yml
-    glidelink_fft.block.yml
     glidelink_radio.block.yml
     glidelink_pl.domain.yml
     glidelink_jscc_tx_control.block.yml
@@ -29,3 +23,10 @@ install(FILES
     glidelink_jscc_rx_symbols.block.yml
     glidelink.tree.yml
     DESTINATION share/gnuradio/grc/blocks)
+
+# the user modules' blocks, generated from their module.yaml (hw/scripts/gen_module.py)
+set(GL_GEN_GRC ${CMAKE_CURRENT_BINARY_DIR}/modules)
+execute_process(COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../../../hw/scripts/gen_module.py grc ${GL_GEN_GRC}
+                COMMAND_ERROR_IS_FATAL ANY)
+file(GLOB GL_GEN_YML ${GL_GEN_GRC}/*.block.yml)
+install(FILES ${GL_GEN_YML} DESTINATION share/gnuradio/grc/blocks)

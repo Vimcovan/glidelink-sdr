@@ -1,6 +1,7 @@
 # GlideLink user module description (docs/design.md 5.3)
 id: ofdm_tx
 name: OFDM transmitter (DeepJSCC-Q link)
+bus: module                  # decodes AXI4-Lite itself (hw/modules/module_desc.py)
 top: glidelink_ofdm_tx
 source: competition design Vimcovan/glidelink-fpga @ 8367bee, src/hw/tx/rtl/phy (RTL unchanged)
 id_value: 0x4F465458          # "OFTX"

@@ -2,16 +2,12 @@
 // GlideLink user module: NCO mixer (frequency shift). Bit-exact reference:
 // hw/modules/nco/model.py; description: module.yaml.
 //
-// Registers (4 KB window):
-//   0x000  ID       RO  0x4E434F31 ("NCO1")
-//   0x004  VERSION  RO  {major[15:0], minor[7:0], patch[7:0]}
-//   0x008  CONTROL  RW  bit 0: enable (default 0 = samples pass unchanged,
-//                       the phase holds), bit 1: soft reset (self-clearing:
-//                       empties the pipeline, phase back to PHASE's value;
-//                       flush from the shell does the same)
-//   0x00C  STATUS   RO  bit 0: enabled
-//   0x010  FREQ     RW  phase increment per sample, f / fs * 2^32
-//   0x014  PHASE    RW  write: phase of the next sample; read: current phase
+// Registers (module.yaml; the register file around this module is generated):
+// CONTROL.enable (default 0 = samples pass unchanged, the phase holds),
+// CONTROL.soft_reset (empties the pipeline, phase back to PHASE's value; flush
+// from the shell does the same), STATUS.enabled, FREQ (phase increment per
+// sample, f / fs * 2^32), PHASE (write: phase of the next sample; read:
+// current phase).
 // x[n] * exp(j 2 pi phase / 2^32) through a 4096-point table, products
 // rounded (+2^14, >> 15) and saturated to sc16. tuser / tlast travel with
 // their samples. Pipeline of 5 stages, stalled as a whole by back-pressure.
@@ -24,20 +20,13 @@ module glidelink_nco (
   input             rstn,
   input             flush,                  // stream state only (PORT_RESET): registers kept
 
-  input             s_axil_awvalid,
-  output            s_axil_awready,
-  input     [11:0]  s_axil_awaddr,
-  input             s_axil_wvalid,
-  output            s_axil_wready,
-  input     [31:0]  s_axil_wdata,
-  output            s_axil_bvalid,
-  input             s_axil_bready,
-  input             s_axil_arvalid,
-  output            s_axil_arready,
-  input     [11:0]  s_axil_araddr,
-  output            s_axil_rvalid,
-  input             s_axil_rready,
-  output    [31:0]  s_axil_rdata,
+  input             enable,
+  input             soft_reset,
+  output            enabled,
+  input     [31:0]  freq,
+  input     [31:0]  phase,                  // PHASE as written
+  input             phase_wr,
+  output    [31:0]  phase_rd,
 
   input             s_axis_tvalid,
   output            s_axis_tready,
@@ -52,62 +41,15 @@ module glidelink_nco (
   output            m_axis_tlast
 );
 
-  localparam [31:0] ID = 32'h4E434F31;
-  localparam [31:0] VERSION = 32'h00010000;
+  reg  [31:0] ph = 32'd0;                   // the phase of the next sample
 
-  // ---------------------------------------------------------------------------
-  // registers
-
-  wire        wr_en;
-  wire [11:0] wr_addr, rd_addr;
-  wire [31:0] wr_data;
-  reg  [31:0] rd_data;
-  reg         enable = 1'b0, soft_rst = 1'b0;
-  reg  [31:0] freq = 32'd0, phase_set = 32'd0, phase = 32'd0;
-  reg         phase_load = 1'b0;
-
-  glidelink_module_axil i_axil (
-    .clk(clk), .rstn(rstn),
-    .s_axil_awvalid(s_axil_awvalid), .s_axil_awready(s_axil_awready), .s_axil_awaddr(s_axil_awaddr),
-    .s_axil_wvalid(s_axil_wvalid), .s_axil_wready(s_axil_wready), .s_axil_wdata(s_axil_wdata),
-    .s_axil_bvalid(s_axil_bvalid), .s_axil_bready(s_axil_bready),
-    .s_axil_arvalid(s_axil_arvalid), .s_axil_arready(s_axil_arready), .s_axil_araddr(s_axil_araddr),
-    .s_axil_rvalid(s_axil_rvalid), .s_axil_rready(s_axil_rready), .s_axil_rdata(s_axil_rdata),
-    .wr_en(wr_en), .wr_addr(wr_addr), .wr_data(wr_data), .rd_addr(rd_addr), .rd_data(rd_data));
-
-  always @(posedge clk) begin
-    soft_rst <= 1'b0;
-    phase_load <= 1'b0;
-    if (!rstn) begin
-      enable <= 1'b0;
-      freq <= 32'd0;
-      phase_set <= 32'd0;
-    end else if (wr_en) begin
-      case (wr_addr[11:2])
-        10'h002: begin enable <= wr_data[0]; soft_rst <= wr_data[1]; end
-        10'h004: freq <= wr_data;
-        10'h005: begin phase_set <= wr_data; phase_load <= 1'b1; end
-        default: ;
-      endcase
-    end
-  end
-
-  always @(*) begin
-    case (rd_addr[11:2])
-      10'h000: rd_data = ID;
-      10'h001: rd_data = VERSION;
-      10'h002: rd_data = {31'd0, enable};
-      10'h003: rd_data = {31'd0, enable};
-      10'h004: rd_data = freq;
-      10'h005: rd_data = phase;
-      default: rd_data = 32'd0;
-    endcase
-  end
+  assign enabled = enable;
+  assign phase_rd = ph;
 
   // ---------------------------------------------------------------------------
   // stream: 5 stages, all advance together when the output can move (ce)
 
-  wire        rst = !rstn || soft_rst || flush;
+  wire        rst = !rstn || soft_reset || flush;
   reg   [4:0] v = 5'd0;                     // stage valid
   wire        ce = !v[4] || m_axis_tready;
   wire        take = s_axis_tvalid && ce;
@@ -120,10 +62,10 @@ module glidelink_nco (
   reg  [11:0] k0 = 12'd0;
 
   always @(posedge clk) begin
-    if (rst || phase_load)
-      phase <= phase_set;
+    if (rst || phase_wr)
+      ph <= phase;
     else if (take && enable)
-      phase <= phase + freq;
+      ph <= ph + freq;
   end
 
   integer j;
@@ -136,7 +78,7 @@ module glidelink_nco (
     if (ce) begin
       side[0] <= {s_axis_tlast, s_axis_tuser, s_axis_tdata};
       byp[0] <= !enable;
-      k0 <= phase[31:20];
+      k0 <= ph[31:20];
       for (j = 1; j < 5; j = j + 1) begin
         side[j] <= side[j - 1];
         byp[j] <= byp[j - 1];

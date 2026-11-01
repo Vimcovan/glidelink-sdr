@@ -1,4 +1,4 @@
-# GlideLink user module description (docs/design.md 5.3)
+# GlideLink user module description (hw/modules/module_desc.py; docs/design.md 5.3)
 id: fir
 name: FIR filter
 rtl: glidelink_fir.v
@@ -17,22 +17,29 @@ function: >-
   y[n] = sum h[k] x[n-k] on I and Q (real coefficients, 40-bit accumulation), then
   (y + 2^(SHIFT-1)) >> SHIFT saturated to 16 bits. The delay line runs on across
   packets; disabled samples pass unchanged and do not enter it.
-registers:
-  - {name: ID, offset: 0x000, access: ro}
-  - {name: VERSION, offset: 0x004, access: ro}
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on
   - name: CONTROL
-    offset: 0x008
-    access: rw
-    default: 0
     fields:
       - {name: enable, bits: 0, doc: "1 = filter, 0 = pass unchanged"}
-      - {name: soft_reset, bits: 1, doc: "self-clearing: pipeline and delay line cleared"}
-      - {name: load, bits: 2, doc: "self-clearing: shadow coefficients become active"}
-  - {name: STATUS, offset: 0x00C, access: ro, fields: [{name: enabled, bits: 0}]}
-  - {name: TAPS, offset: 0x010, access: ro}
-  - {name: SHIFT, offset: 0x014, access: rw, default: 15, doc: "output right shift, 0..31"}
-  - {name: COEF_ADDR, offset: 0x018, access: rw, default: 0, doc: "shadow index of the next COEF_DATA access"}
-  - {name: COEF_DATA, offset: 0x01C, access: rw, doc: "shadow coefficient [15:0]; a write moves COEF_ADDR on by one"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "pipeline and delay line cleared"}
+      - {name: load, bits: 2, access: pulse, doc: "shadow coefficients become active"}
+  - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: TAPS, access: ro, value: TAPS, doc: "number of coefficients"}
+  - {name: SHIFT, width: 5, default: 15, doc: "output right shift, 0..31"}
+  - {name: COEF_ADDR, width: 8, strobe: true, readback: true, doc: "shadow index of the next COEF_DATA access"}
+  - {name: COEF_DATA, width: 16, signed: true, strobe: true, readback: true,
+     doc: "shadow coefficient at COEF_ADDR; a write moves COEF_ADDR on by one"}
+block:
+  doc: FIR filter with integer coefficients (signed 16 bit, up to TAPS = 32) on I and Q, then a rounding right shift.
+  params:
+    - {name: taps, label: Coefficients, type: int_vector, default: [32767],
+       write: [[COEF_ADDR, 0], [COEF_DATA, "pad(taps, read('TAPS'))"], [CONTROL, 5]],
+       doc: "signed 16 bit, up to 32 (missing ones are 0); loaded together, the filter enabled"}
+    - {name: shift, label: Output shift, type: int, default: 15, check: "0 <= shift <= 31",
+       write: {SHIFT: shift}, doc: "y rounded and shifted right by this many bits"}
+tests:                        # in block parameters (hw/scripts/glidelink.py test)
+  - {taps: [-32768, 1200, -900, 4000, 77, 32767, -5, 3, 12345], shift: 14}
+  - {taps: [2, -1, 0, 1, 2, -2, -1], shift: 0}
 resources:                    # in the shell, xczu5eg, Vivado 2025.2
   lut: 712
   ff: 843

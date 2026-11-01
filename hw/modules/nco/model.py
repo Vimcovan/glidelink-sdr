@@ -10,7 +10,8 @@ counts the samples taken since PHASE was last written (or since reset):
     im    = sat16((I S + Q C + 2^14) >> 15)
 
 so FREQ = f / fs * 2^32 moves the signal up by f. With CONTROL.enable = 0 the
-samples pass unchanged and the phase holds.
+samples pass unchanged and the phase holds. Model: the module at register level (the
+software GNU Radio block and the generic test drive it as they drive the PL module).
 
     python model.py rom       writes glidelink_nco_rom.v (the table)
     python model.py vectors   writes tb/ vectors for the module testbench
@@ -23,6 +24,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from sc16 import pack, unpack, sat16  # noqa: E402
+import module_desc  # noqa: E402
 
 TABLE_BITS = 12
 
@@ -48,6 +50,27 @@ def process(words, freq, phase=0, enable=True):
     re = sat16((i * C - q * S + (1 << 14)) >> 15)
     im = sat16((i * S + q * C + (1 << 14)) >> 15)
     return pack(re, im), int((phase + n * freq) & 0xFFFFFFFF)
+
+
+class Model(module_desc.RegisterModel):
+    """glidelink_nco at register level"""
+
+    def __init__(self, params=None):
+        super().__init__(module_desc.load("nco", os.path.dirname(HERE)), params)
+        self.phase = 0
+
+    def on_write(self, name, value):
+        if name == "PHASE" or (name == "CONTROL" and value & 2):     # soft reset: phase = PHASE
+            self.phase = self.regs["PHASE"]
+
+    def on_read(self, name):
+        if name == "STATUS":
+            return self.field("CONTROL", "enable")
+        return self.phase if name == "PHASE" else None
+
+    def process(self, words):
+        out, self.phase = process(words, self.regs["FREQ"], self.phase, bool(self.field("CONTROL", "enable")))
+        return out
 
 
 def write_rom(path):

@@ -13,7 +13,8 @@ register, not part of the RFNoC block).
 
 Cyclic prefix removal / insertion with one-entry lists (CP_*_LEN, then CP_*_LIST_LOAD;
 the lists repeat) drops the first cp_rem samples of each input block of N + cp_rem, and
-repeats the last cp_ins outputs in front of each FFT.
+repeats the last cp_ins outputs in front of each FFT. Model: the module at register level, with
+lists of any length (the software GNU Radio block drives it as the PL block drives the module).
 
     python model.py vectors   writes tb/ vectors for the module testbench (capture mode;
                               tb/vectors_bypass: compare mode, CONTROL.enable = 0)
@@ -27,6 +28,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from sc16 import pack, unpack, sat16  # noqa: E402
+import module_desc  # noqa: E402
 
 MAX_LOG2 = 12
 ORDER_NORMAL, ORDER_REVERSE, ORDER_NATURAL, ORDER_BITREV = 0, 1, 2, 3
@@ -57,13 +59,16 @@ def bitrev(n_log2):
     return np.array([int(format(v, f"0{n_log2}b")[::-1], 2) for v in k]) if n_log2 else k
 
 
-def transform(x, n_log2, scaling=None, direction=1, order=ORDER_NORMAL):
-    """complex FFT of one block, as integers before rounding"""
+def transform(x, n_log2, scaling=None, direction=1, order=ORDER_NORMAL, bypass=False):
+    """complex FFT of one block, as integers before rounding (bypass: the block itself, reordered)"""
     n = 1 << n_log2
     if scaling is None:
         scaling = default_scaling(n_log2)
-    X = np.fft.fft(x) if direction else np.fft.ifft(x) * n
-    X = X * scaling_gain(scaling, n_log2)
+    if bypass:
+        X = np.asarray(x, np.complex128)
+    else:
+        X = np.fft.fft(x) if direction else np.fft.ifft(x) * n
+        X = X * scaling_gain(scaling, n_log2)
     if order == ORDER_NORMAL:
         X = np.fft.fftshift(X)
     elif order == ORDER_REVERSE:
@@ -74,7 +79,7 @@ def transform(x, n_log2, scaling=None, direction=1, order=ORDER_NORMAL):
 
 
 def process(words, n_log2=MAX_LOG2, scaling=None, direction=1, order=ORDER_NORMAL,
-            magnitude=MAG_NONE, cp_rem=0, cp_ins=0, keep=1, enable=True):
+            magnitude=MAG_NONE, cp_rem=0, cp_ins=0, keep=1, enable=True, bypass=False):
     """output words for the input words (whole blocks only)"""
     words = np.asarray(words, np.uint32)
     if not enable:
@@ -85,7 +90,7 @@ def process(words, n_log2=MAX_LOG2, scaling=None, direction=1, order=ORDER_NORMA
     blk = n + cp_rem
     out = []
     for b in range(0, len(x) // blk, max(keep, 1)):    # KEEP: one FFT in every keep
-        X = transform(x[b * blk + cp_rem:(b + 1) * blk], n_log2, scaling, direction, order)
+        X = transform(x[b * blk + cp_rem:(b + 1) * blk], n_log2, scaling, direction, order, bypass)
         if cp_ins:
             X = np.concatenate([X[-cp_ins:], X])
         xi, xq = np.round(X.real), np.round(X.imag)
@@ -96,6 +101,62 @@ def process(words, n_log2=MAX_LOG2, scaling=None, direction=1, order=ORDER_NORMA
             xi, xq = np.minimum(np.round((xi ** 2 + xq ** 2) / 32768), 32767), 0 * xq
         out.append(pack(sat16(xi.astype(np.int64)), sat16(xq.astype(np.int64))))
     return np.concatenate(out) if out else np.zeros(0, np.uint32)
+
+
+class Model(module_desc.RegisterModel):
+    """glidelink_fft at register level: whole FFT blocks as they arrive, the cyclic prefix
+    lists cycled, one FFT in every KEEP passed"""
+
+    RESETS = ("CONTROL", "LENGTH_LOG2", "RESET", "CP_INS_LIST_LOAD", "CP_INS_LIST_CLR")
+
+    def __init__(self, params=None):
+        super().__init__(module_desc.load("fft", os.path.dirname(HERE)), params)
+        self.ins, self.rem = [], []
+        self.restart()
+
+    def restart(self):
+        self.buf = np.zeros(0, np.uint32)
+        self.ri = self.ii = self.kcnt = 0
+
+    def on_write(self, name, value):
+        if name == "CP_INS_LIST_LOAD":
+            self.ins.append(self.regs["CP_INS_LEN"] & 0xFFF)
+        elif name == "CP_INS_LIST_CLR":
+            self.ins = []
+        elif name == "CP_REM_LIST_LOAD":
+            self.rem.append(self.regs["CP_REM_LEN"] & 0xFFF)
+        elif name == "CP_REM_LIST_CLR":
+            self.rem = []
+        if name in self.RESETS:             # the wrapper resets the core between packets
+            self.restart()
+
+    def on_read(self, name):
+        return {"CP_INS_LIST_OCC": len(self.ins), "CP_REM_LIST_OCC": len(self.rem), "OVERFLOW": 0}.get(name)
+
+    def process(self, words):
+        words = np.asarray(words, np.uint32)
+        if not self.field("CONTROL", "enable"):
+            return words.copy()
+        self.buf = np.concatenate([self.buf, words])
+        n_log2 = self.regs["LENGTH_LOG2"] & 0x1F
+        keep = max(self.regs["KEEP"] & 0xFFFF, 1)
+        out, pos = [], 0
+        while True:
+            rem = self.rem[self.ri % len(self.rem)] if self.rem else 0
+            blk = (1 << n_log2) + rem
+            if len(self.buf) - pos < blk:
+                break
+            ins = self.ins[self.ii % len(self.ins)] if self.ins else 0
+            if self.kcnt == 0:
+                out.append(process(self.buf[pos:pos + blk], n_log2, self.regs["SCALING"], self.regs["DIRECTION"] & 1,
+                                   self.regs["ORDER"] & 3, self.regs["MAGNITUDE"] & 3, rem, ins,
+                                   bypass=bool(self.regs["BYPASS"] & 1)))
+            self.kcnt = (self.kcnt + 1) % keep
+            self.ri += 1
+            self.ii += 1
+            pos += blk
+        self.buf = self.buf[pos:]
+        return np.concatenate(out) if out else np.zeros(0, np.uint32)
 
 
 # ---------------------------------------------------------------------------

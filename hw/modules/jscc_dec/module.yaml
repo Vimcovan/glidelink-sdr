@@ -1,6 +1,7 @@
 # GlideLink user module description (docs/design.md 5.3)
 id: jscc_dec
 name: DeepJSCC-Q decoder
+bus: module                  # decodes AXI4-Lite itself (hw/modules/module_desc.py)
 top: glidelink_jscc_dec
 source: competition design Vimcovan/glidelink-fpga @ 8367bee, src/hw/rx/rtl/network (generated RTL and weights, unchanged)
 id_value: 0x4A444543          # "JDEC"

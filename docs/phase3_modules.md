@@ -10,7 +10,7 @@
 | 编号 | 内容 | 决定 | 理由 |
 |---|---|---|---|
 | F1 | 槽位数 | 外壳 1.4.0 有 3 个槽位：0 直通、1 NCO、2 FIR。原有端口编号不变，新槽位接在后面：源 / 汇 4、5 为槽位 1、2，`PORT_RESET` 位 5、6，寄存器窗口 `0x3000`、`0x4000` | 两个模块串联需要各占一个槽位；不改编号，已有软件与测试不受影响 |
-| F2 | 模块的寄存器接口 | 公共的 AXI4-Lite 从接口 `glidelink_module_axil.v`：给出写脉冲（地址、数据），读数据由模块按地址组合给出 | 每个模块只做地址译码，握手不再各写一遍 |
+| F2 | 模块的寄存器接口 | 寄存器在 `module.yaml` 中声明，`hw/scripts/gen_module.py` 生成寄存器文件（公共的 AXI4-Lite 从接口 `glidelink_module_axil.v` 加地址译码），模块看到的是普通端口 | 模块不写总线握手和地址译码；自己处理总线的模块（`bus: module`，如 FFT）仍可用 `glidelink_module_axil.v` |
 | F3 | 槽位清理 | 模块接口加 `flush` 输入：外壳清理槽位时只清数据通路（流水线、FIR 延迟线；NCO 相位回到 PHASE），寄存器保持 | Soapy 启动流时要清理链路上的槽位，若连寄存器一起复位，模块配置就丢了 |
 | F4 | Soapy 的槽位清理 | 启动流时沿路由把链路上的槽位都清理（RX 往上游、TX 往下游），主机端口 0、1 都如此 | 串联的槽位之间也可能停着半个包；只清直接相连的槽位不够 |
 | F5 | 数值格式 | sc16（`{Q, I}`）；NCO 4096 点表、幅度 32767，复乘结果加 2^14 右移 15 位后饱和；FIR 32 抽头 16 位实系数，40 位累加，输出加 2^(SHIFT−1) 右移 SHIFT 位后饱和 | 舍入与饱和在参考模型中逐比特规定；4096 点表实测最大寄生约 −72 dBc（参考模型，三个频率字，−71.5 ~ −71.9 dBc） |
@@ -18,7 +18,7 @@
 | F7 | 反压 | 整条流水线随输出就绪一起推进（全局使能），FIR 延迟线只在有效样点上更新，流水线里的空拍不影响结果 | 简单、时序宽松；包尾不会卡在流水线里等下一个样点 |
 | F7a | 槽位入口的隔离 | 外壳在每个槽位输入前放两级缓冲（`glidelink_skid.v`），流交换看到的就绪总是寄存器 | 槽位的输出与输入在流交换的多路选择器中相遇；模块的 `s_axis_tready` 若组合依赖 `m_axis_tready`（AXI4-Stream 允许），结构上就成了组合环路（第一次实现时 Vivado 报 LUTLP-1）。由外壳隔离，模块不需要遵守标准以外的规则 |
 | F8 | 参考模型与测试向量 | 每个模块一个 `model.py`（NumPy），生成 NCO 的表（RTL 文件）与仿真向量；通用测试平台 `tb_module.v` 读向量、随机间隔与反压、核对数据与 `tuser` / `tlast` | 第 6 节的流程：参考模型是 RTL 与软件块的共同基准 |
-| F9 | GNU Radio 块 | 每个模块一个软件块（调用参考模型）和一个代理块（按 `module.yaml` 中的寄存器名写槽位寄存器，不传数据）；参考模型与说明文件安装时从 `hw/modules` 拷入 Python 包 | 只有一份模型源码；软件块与 PL 模块逐比特一致，代理块替换前后输出可以直接比较 |
+| F9 | GNU Radio 块 | 每个模块一个软件块（寄存器级参考模型 `Model`）和一个 PL 块（写槽位寄存器，不传数据），都由 `module.yaml` 的 `block` 段生成，"参数 → 寄存器"换算两者共用；参考模型与说明文件安装时从 `hw/modules` 拷入 Python 包 | 只有一份模型源码，不写块代码；软件块与 PL 模块逐比特一致，替换前后输出可以直接比较 |
 
 ## 2. 文件
 
@@ -29,7 +29,7 @@
 | `hw/modules/nco/` | `glidelink_nco.v`、`glidelink_nco_rom.v`（由模型生成）、`model.py`、`module.yaml`、`tb/vectors*` |
 | `hw/modules/fir/` | `glidelink_fir.v`、`model.py`、`module.yaml`、`tb/vectors*` |
 | `hw/modules/chain_vectors.py` | 外壳级测试 `tb_shell4` 的向量：主机端口 1 → NCO → FIR → 主机端口 1 |
-| `sw/gr-glidelink/python/glidelink/modules.py` | `nco_model` / `nco`、`fir_model` / `fir` |
+| `sw/gr-glidelink/python/glidelink/modules.py` | 按 `module.yaml` 生成的 `nco_model` / `nco`、`fir_model` / `fir`、`fft_model` / `fft` |
 | `sw/tests/modules_hil.py` | 上板硬件在环：NCO、FIR、两者串联，逐字对参考模型 |
 | `sw/tests/gr_proxy_swap.py` | GNU Radio 中软件块与代理块的输出比较 |
 

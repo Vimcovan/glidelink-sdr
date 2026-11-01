@@ -60,7 +60,7 @@ tx.txCyclic(x);                       % 在板上循环发送，不占网络
 | GlideLink Source / Sink | 板子的射频接收 / 发射：填板子地址、采样率、中心频率、带宽、增益模式与增益（或发射衰减），运行中可改 |
 | GlideLink Control | 路由、驱动参数、寄存器；周期回读状态 |
 | GlideLink Host Source / Sink | 主机端口 1：PL 槽位中模块的数据 |
-| GlideLink NCO / FIR / FFT（software / PL） | 模块的软件模型与 PL 代理块；FFT 是 Ettus RFNoC FFT 块的处理核心 |
+| FPGA modules：GlideLink NCO / FIR / FFT（software / PL） | 模块的软件模型与 PL 块，由各模块的 `module.yaml` 生成；FFT 是 Ettus RFNoC FFT 块的处理核心 |
 | GlideLink Radio (PL) | 射频在 PL 一侧的收发两端（`rf_rx` / `rf_tx`）与射频设置 |
 
 PL 块的橙色端口像 RFNoC 块一样在 GRC 中直接连线：连线就是 PL 内部的路由，数据不经过 GNU Radio，主机端口块是 PL 与电脑交接数据的地方
@@ -114,15 +114,17 @@ Communications Toolbox Support Package for ADALM-Pluto 可以按地址连接板�
 
 ## 5. 加入自己的 FPGA 模块
 
-1. 按 [`design.md`](design.md) 第 5 节的接口写模块：AXI4-Stream 输入输出（sc16 或自定义格式）、AXI4-Lite 寄存器、`flush` 输入；
-   附模块说明文件 `module.yaml`、参考模型 `model.py`、仿真测试平台，放在 `hw/modules/<id>/`（参照 `nco`、`fir`）。
+完整说明见 [`module_guide.md`](module_guide.md)。
+
+1. 在 `hw/modules/<id>/` 写模块 RTL（AXI4-Stream 输入输出、`flush`，寄存器是普通端口）、`module.yaml`（寄存器表与 GNU Radio 块参数）
+   和可选的参考模型 `model.py`（参照 `nco`、`fir`）。AXI4-Lite 寄存器文件由脚本按寄存器表生成。
    第三方 RTL 放进单独的库目录、按原样保留（如 `hw/modules/uhd_rfnoc`，Ettus UHD 的 LGPL 源文件），模块在 `module.yaml` 的 `uses` 中引用，
    适配写在模块自己的包装里（`hw/modules/fft/glidelink_fft.sv` 把 RFNoC 的 CtrlPort 与数据流换成槽位的 AXI4-Lite 与 AXI4-Stream）。
 2. 在 `hw/images/<镜像>.yaml` 中把模块放进槽位，选处理时钟（100 / 200 / 250 MHz）与 RTL 参数。
 3. 构建：`GLIDELINK_IMAGE=<镜像> vivado -mode batch -source system_project.tcl`（`hw/projects/fmcomms2_pynqzu`，环境见
    [`hw/README.md`](../hw/README.md)），设备树叠加用 `hw/dts/build_dtbo.sh`。
-4. 软件原型阶段在 GNU Radio 中用调用参考模型的软件块，换成 PL 后用代理块（只写寄存器、设路由，数据经外壳的流交换进出槽位），
-   输出应逐比特相同（`sw/tests/gr_proxy_swap.py`）。
+4. 重新安装 gr-glidelink，模块的软件块（参考模型）与 PL 块（只写寄存器，数据经橙色连线在 PL 内流动）由 `module.yaml` 自动生成。
+   软件原型阶段用软件块，换成 PL 块后输出应相同（`sw/tests/gr_proxy_swap.py`）；PL 块按模块 ID 自己找槽位。
 
 ## 6. 性能与限制（概要）
 

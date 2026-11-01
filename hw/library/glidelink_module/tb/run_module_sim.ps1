@@ -8,7 +8,7 @@
 # the output is written to <vectors>/captured.hex for the module's own checker.
 param(
   [Parameter(Mandatory = $true)][string]$ModuleDir,
-  [Parameter(Mandatory = $true)][string]$Top,
+  [string]$Top = "",
   [string]$Vectors = "",
   [switch]$Capture,
   [int]$Packets = 0,                        # capture mode: stop after this many output packets
@@ -23,10 +23,21 @@ $mod = (Resolve-Path $ModuleDir).Path
 $name = Split-Path -Leaf $mod
 if ($Vectors -eq "") { $Vectors = Join-Path $mod "tb\vectors" }
 $vec = (Resolve-Path $Vectors).Path.Replace([char]92, [char]47)
-$work = Join-Path $here "work\$Top"
+$work = Join-Path $here "work\$name"
 New-Item -ItemType Directory -Force $work | Out-Null
 Push-Location $work
 try {
+
+  # the module's sources and IP, as the image generator lists them
+  $py = @"
+import json, sys
+sys.path.insert(0, r'$here\..\..\..\scripts')
+import gen_image
+i = gen_image.module_info('$name', r'$work\gen')
+print(json.dumps({'top': i['top'], 'rtl': i['rtl'], 'sv': gen_image.sv_compile_order(i['rtl']), 'ip': gen_image.patch_ips(i, r'$work\ip_xci')}))
+"@
+  $info = (& python -c $py) | ConvertFrom-Json
+  if ($Top -eq "") { $Top = $info.top }
   $cfg = "``define DUT $Top`n``define VEC `"$vec`"`n"
   if ($Capture) { $cfg += "``define CAPTURE`n" }
   if ($Packets -gt 0) { $cfg += "``define CAPTURE_PACKETS $Packets`n" }
@@ -34,16 +45,6 @@ try {
   if ($InFlags -ge 0) { $cfg += "``define IN_FLAGS 8'd$InFlags`n" }
   if ($TimeoutMs -gt 0) { $cfg += "``define TIMEOUT_NS ($($TimeoutMs * 1e6))`n" }
   $cfg | Set-Content -Encoding ascii tb_cfg.vh
-
-  # the module's sources and IP, as the image generator lists them
-  $py = @"
-import json, sys
-sys.path.insert(0, r'$here\..\..\..\scripts')
-import gen_image
-i = gen_image.module_info('$name')
-print(json.dumps({'rtl': i['rtl'], 'sv': gen_image.sv_compile_order(i['rtl']), 'ip': gen_image.patch_ips(i, r'$work\ip_xci')}))
-"@
-  $info = (& python -c $py) | ConvertFrom-Json
   $v = @(Get-ChildItem (Join-Path $here "..\*.v") | ForEach-Object { $_.FullName })
   $v += @($info.rtl | Where-Object { $_ -like "*.v" })
   # SystemVerilog packages first, in dependency order: xvlog compiles in the order given
@@ -82,7 +83,7 @@ print(json.dumps({'rtl': i['rtl'], 'sv': gen_image.sv_compile_order(i['rtl']), '
   # internal assertion ("add_1 must be in range") right after reset
   & "$Bin\xelab.bat" --nolog --debug typical --relax $libs tb_module glbl -s tb_module | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "xelab failed" }
-  & "$Bin\xsim.bat" --nolog tb_module -R | Select-String -Pattern "PASS|FAIL|ERROR|Fatal|module ID|compared|captured"
+  & "$Bin\xsim.bat" --nolog tb_module -R | Select-String -Pattern "PASS|FAIL|ERROR|Fatal|module ID|compared|captured|read back"
 } finally {
   Pop-Location
 }

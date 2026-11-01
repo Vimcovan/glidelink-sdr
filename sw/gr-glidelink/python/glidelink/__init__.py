@@ -24,6 +24,7 @@ from .control import control
 from .rf import source, sink
 from .video import video_file_source, jscc_tx_sink, jscc_rx_source, video_sink
 from .host_port import host_source, host_sink
-from .modules import nco_model, nco, fir_model, fir, fft_model, fft
+from .modules import BLOCKS as _module_blocks
+globals().update(_module_blocks)    # nco, nco_model, fir, ... (modules.py)
 from .pl import radio, connect as pl_connect
 from .jscc import jscc_tx_control, jscc_rx_view, jscc_rx_symbols

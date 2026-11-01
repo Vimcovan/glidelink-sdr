@@ -11,8 +11,12 @@ GlideLink 平台的 GNU Radio 3.10 OOT 模块（纯 Python 块）：板子的射
 | Video Sink | 显示画面；两路输入时左边是发出的画面（输入 0），右边是解码画面（输入 1），每帧解码画面配上最匹配的发出画面（近 30 帧中与最佳差在 0.5 dB 以内的最新一帧），显示逐帧 PSNR、平均 PSNR、两路帧率与延迟帧数；两路输入各自取用，链路中断时发送不受影响 |
 | GlideLink Control | 设流交换路由；按顺序写设置（AD9361 驱动参数、`gain_control_mode`、`initialize`）；写寄存器；按间隔回读一组寄存器 / 设置，从 `status` 消息口发出。运行中改设置字典里用到的变量时，只写变化的项，字典含 `'initialize': True` 时随后重新初始化 AD9361。`cmd` 消息口收同样键的字典 |
 | GlideLink Host Source / Sink | 主机端口 1：槽位中模块的数据。复数（sc16 / 32768）或整数（原样 32 位字）；带包头时源打 `rx_time` / `rx_eob` 标签，汇按 `tx_time` / `tx_eob` 标签定时发送、结束突发 |
-| GlideLink NCO / FIR / FFT (software) | 调用模块的参考模型（`hw/modules/<id>/model.py`）：软件原型阶段使用。NCO、FIR 与 PL 中的模块逐比特一致；FFT 用浮点计算，与 PL 输出相差约 1 LSB |
-| GlideLink NCO / FIR / FFT (PL) | 代理块：按 `module.yaml` 中的寄存器名写槽位寄存器，不传数据；数据经 PL 端口的连线（或控制块设的路由）进出槽位。槽位号按镜像填 |
+| GlideLink NCO / FIR / FFT (software) | 调用模块的参考模型（`hw/modules/<id>/model.py` 的 `Model`）：软件原型阶段使用。NCO、FIR 与 PL 中的模块逐比特一致；FFT 用浮点计算，与 PL 输出相差约 1 LSB |
+| GlideLink NCO / FIR / FFT (PL) | 模块在 PL 槽位中：按参数写寄存器，不传数据；数据经 PL 端口的连线（或控制块设的路由）进出槽位。槽位 -1（默认）按模块 ID 自己找 |
+
+模块的这两种块不是手写的：`modules.py` 按每个带 `block` 段的 `hw/modules/<id>/module.yaml` 生成 Python 类，GRC 的块文件在安装时由
+`hw/scripts/gen_module.py` 生成（GRC 分类 GlideLink / FPGA modules）。两种块参数相同、"参数 → 寄存器"的换算相同，软件块把寄存器写给参考模型，
+PL 块写给板上的槽位（[`docs/module_guide.md`](../../docs/module_guide.md)）。
 | GlideLink Radio (PL) | 射频在 PL 一侧的两端：输出 `rf_rx`（AD9361 接收采样）、输入 `rf_tx`（送往 AD9361 发射），以及采样率、收发本振、带宽、增益模式与增益、发射衰减。相当于 RFNoC 的 Radio 块 |
 
 ## 在 GRC 中连接 PL 模块
@@ -24,14 +28,14 @@ GlideLink 的 PL 块有橙色端口（GRC 端口域 `glidelink_pl`，`grc/glidel
 | 块 | 橙色输入（交换汇） | 橙色输出（交换源） |
 |---|---|---|
 | GlideLink Radio (PL) | `rf_tx` | `rf_rx` |
-| 模块代理块（NCO / FIR / FFT (PL)，槽位 k） | `slot<k>_in` | `slot<k>_out` |
+| 模块的 PL 块（NCO / FIR / FFT (PL)，在槽位 k） | `slot<k>_in` | `slot<k>_out` |
 | GlideLink Host Source / Sink（主机端口 1） | `host1_rx`（Host Source） | `host1_tx`（Host Sink） |
 | GlideLink Source / Sink（主机端口 0） | `host0_rx`（Source） | `host0_tx`（Sink） |
 
 - 主机端口块一端是橙色端口，另一端是普通数据流端口：PL 与 GNU Radio 之间的数据在这里交接。
 - 交换一个源同一时刻只接一个汇，所以每个橙色端口只能连一条线（GRC 会提示）；同一流程图里的 PL 块要在同一块板上。
 - 没有连线的橙色输入保持原来的路由。旧流程图里用 GlideLink Control 写路由的方式照常可用。
-- 一个模块的软件块与代理块可以互换：软件原型阶段用 (software) 块和普通数据流，换到 PL 时用 (PL) 块和橙色连线。
+- 一个模块的软件块与 PL 块可以互换：软件原型阶段用 (software) 块和普通数据流，换到 PL 时用 (PL) 块和橙色连线。
 
 控制块自己开一个 Soapy 设备实例，只做控制，不碰射频流；Soapy 模块的构造不改硬件状态，几个实例可以同时存在。
 
@@ -78,6 +82,6 @@ Costas 环后显示星座；频谱、瀑布图；滑块改发射衰减和接收�
 `examples/agc_fast_attack.grc`：快速 AGC，用滑块改锁定电平（`adi,agc-inner-thresh-high`），每次改动写入驱动参数并重新初始化
 AD9361，界面上显示寄存器 0x101 的回读、频谱和接收幅度。参数 `uri` 选板子（默认 `ip:192.168.3.1`）。
 
-自动化的验收见 `sw/tests/gr_agc_init.py`（第 2 阶段）与 `sw/tests/gr_proxy_swap.py`（软件块换成代理块后输出不变）。
+自动化的验收见 `sw/tests/gr_agc_init.py`（第 2 阶段）与 `sw/tests/gr_proxy_swap.py`（软件块换成 PL 块后输出不变）。
 
 Python 块在流程图运行期间要保持引用（存到变量里）；在 `connect()` 里直接构造会被回收，流程图启动时崩溃。

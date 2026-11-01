@@ -1,4 +1,4 @@
-# GlideLink user module description (docs/design.md 5.3)
+# GlideLink user module description (hw/modules/module_desc.py; docs/design.md 5.3)
 id: nco
 name: NCO mixer
 rtl: glidelink_nco.v
@@ -15,19 +15,26 @@ function: >-
   x[n] * exp(j 2 pi phase[n] / 2^32), phase[n] = PHASE + n FREQ; 4096-point table
   round(32767 cos / sin); products rounded (+2^14, >> 15) and saturated.
   Disabled: samples pass unchanged, the phase holds.
-registers:
-  - {name: ID, offset: 0x000, access: ro}
-  - {name: VERSION, offset: 0x004, access: ro}
+registers:                    # ID 0x000, VERSION 0x004, then from 0x008 on
   - name: CONTROL
-    offset: 0x008
-    access: rw
-    default: 0
     fields:
       - {name: enable, bits: 0, doc: "1 = mix, 0 = pass unchanged"}
-      - {name: soft_reset, bits: 1, doc: "self-clearing: pipeline emptied, phase = PHASE"}
-  - {name: STATUS, offset: 0x00C, access: ro, fields: [{name: enabled, bits: 0}]}
-  - {name: FREQ, offset: 0x010, access: rw, default: 0, doc: "phase increment per sample = f / fs * 2^32"}
-  - {name: PHASE, offset: 0x014, access: rw, default: 0, doc: "write: phase of the next sample; read: current phase"}
+      - {name: soft_reset, bits: 1, access: pulse, doc: "pipeline emptied, phase = PHASE"}
+  - {name: STATUS, access: ro, fields: [{name: enabled, bits: 0}]}
+  - {name: FREQ, doc: "phase increment per sample = f / fs * 2^32"}
+  - {name: PHASE, strobe: true, readback: true, doc: "write: phase of the next sample; read: current phase"}
+block:
+  doc: Frequency shift by freq (x * exp(j 2 pi freq t)), 4096-point table.
+  params:
+    - {name: samp_rate, label: Sample rate, type: real, default: 1.0e+6, grc_default: samp_rate}
+    - {name: freq, label: Frequency shift (Hz), type: real, default: 0.0,
+       write: {FREQ: "freq / samp_rate * 2**32"}}
+    - {name: phase, label: Start phase (turns), type: real, default: 0.0,
+       write: {PHASE: "phase * 2**32"}, doc: "phase of the next sample; a stream start flushes the slot, which brings the phase back to it"}
+  start: {CONTROL: 1}
+tests:                        # in block parameters (hw/scripts/glidelink.py test)
+  - {freq: 1.6e+6, samp_rate: 31.25e+6, phase: 0.25}
+  - {freq: -1.95e+6, samp_rate: 31.25e+6}
 resources:                    # in the shell, xczu5eg, Vivado 2025.2 (table in LUTs)
   lut: 1076
   ff: 392

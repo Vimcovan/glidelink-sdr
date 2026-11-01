@@ -15,7 +15,9 @@ parameters that name a file in the module directory, e.g. a FIR coefficient file
 from copies in <out_dir>/ip with the ip_files parameters rewritten to absolute paths (the path
 stored in an .xci is relative to wherever it came from, and Vivado loads such a file as soon as
 it imports the IP). A module's or library's .v, .sv, .mem, .vh and .svh files
-are added to the project, and the directories holding headers to its include path.
+are added to the project, and the directories holding headers to its include path. For a
+module with bus: generated (the default) the register file around it, <top>_slot.v, is written
+by gen_module.py into <out_dir>/modules and takes the module's place in the slot.
 
     python gen_image.py <image.yaml> <out_dir>
 """
@@ -28,6 +30,8 @@ import sys
 import yaml
 
 HW = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gen_module  # noqa: E402
 CLOCKS = {200: None, 250: "clk_250", 100: "clk_100"}   # None: the processing clock
 
 
@@ -65,11 +69,13 @@ def sv_compile_order(paths):
     return order + [p for p in sv if p not in done]
 
 
-def module_info(name):
+def module_info(name, gen_dir=None):
+    """sources, IP and slot top of a module; gen_dir: where the register file goes (bus: generated)"""
     if name == "passthrough":
         return {"top": "glidelink_passthrough", "dir": None, "rtl": [], "ip": []}
     d = os.path.join(HW, "modules", name)
-    desc = yaml.safe_load(open(os.path.join(d, "module.yaml")))
+    desc = gen_module.module_desc.load(name)
+    top = desc["top"]
     rtl = []
     for lib in desc.get("uses", []) or []:
         rtl += sources(os.path.join(HW, "modules", lib))
@@ -77,7 +83,11 @@ def module_info(name):
     ip = [os.path.join(d, x) for x in desc.get("ip", []) or []]
     ip_files = {name: {p: os.path.join(d, f) for p, f in params.items()}
                 for name, params in (desc.get("ip_files", {}) or {}).items()}
-    return {"top": desc["top"], "dir": d, "rtl": rtl, "ip": ip, "ip_files": ip_files, "desc": desc}
+    if desc["bus"] == "generated":
+        gen_dir = gen_dir or os.path.join(d, "build")
+        top = gen_module.wrapper(desc, gen_dir)
+        rtl.append(os.path.join(gen_dir, top + ".v"))
+    return {"top": top, "dir": d, "rtl": rtl, "ip": ip, "ip_files": ip_files, "desc": desc}
 
 
 def patch_ips(info, out):
@@ -116,7 +126,7 @@ def generate(image_path, out):
     resolved, rtl, ip = [], [], []
     body = []
     for k, sl in enumerate(slots):
-        info = module_info(sl["module"])
+        info = module_info(sl["module"], os.path.join(out, "modules"))
         clock = int(sl.get("clock", 200))
         if clock not in CLOCKS:
             raise SystemExit(f"slot {k}: clock {clock} MHz not available (200, 250, 100)")
