@@ -36,6 +36,13 @@ ad_ip_instance axi_ad9361 axi_ad9361
 ad_ip_parameter axi_ad9361 CONFIG.ID 0
 ad_ip_parameter axi_ad9361 CONFIG.DAC_DDS_TYPE 1
 ad_ip_parameter axi_ad9361 CONFIG.DAC_DDS_CORDIC_DW 14
+# not used by GlideLink (22 DSP slices): the DAC data comes from the shell (data select 2,
+# never the DDS test tones, which the driver otherwise selects after a reset); the RX DC
+# filter and RX / TX IQ correction stay off (RX enables 0, TX coefficients identity)
+ad_ip_parameter axi_ad9361 CONFIG.DAC_DDS_DISABLE 1
+ad_ip_parameter axi_ad9361 CONFIG.ADC_DCFILTER_DISABLE 1
+ad_ip_parameter axi_ad9361 CONFIG.ADC_IQCORRECTION_DISABLE 1
+ad_ip_parameter axi_ad9361 CONFIG.DAC_IQCORRECTION_DISABLE 1
 
 ad_connect $sys_iodelay_clk axi_ad9361/delay_clk
 ad_connect axi_ad9361/l_clk axi_ad9361/clk
