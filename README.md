@@ -22,6 +22,7 @@ PL（参考 RFNoC 的思路，用户可加入自己的 FPGA 模块），最终�
 | 文档 | 内容 |
 |---|---|
 | [`docs/user_guide.md`](docs/user_guide.md) | 使用指南：连接板子、板上服务、各种用法、常用操作 |
+| [`docs/qpsk_tutorial.md`](docs/qpsk_tutorial.md) | 教程：QPSK 收发，从纯软件流程图一步步把信号处理卸载到 PL |
 | [`docs/pc_setup.md`](docs/pc_setup.md) | 电脑端环境：WSL（GNU Radio、Soapy、图形桌面）、MATLAB 及支持包 |
 | [`docs/known_issues.md`](docs/known_issues.md) | 已知问题与注意事项 |
 | [`docs/design.md`](docs/design.md) | 设计文档：架构、外壳、模块接口、主机软件 |

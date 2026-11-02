@@ -66,8 +66,8 @@ tx.txCyclic(x);                       % 在板上循环发送，不占网络
 PL 块的橙色端口像 RFNoC 块一样在 GRC 中直接连线：连线就是 PL 内部的路由，数据不经过 GNU Radio，主机端口块是 PL 与电脑交接数据的地方
 （[`sw/gr-glidelink/README.md`](../sw/gr-glidelink/README.md)）。
 
-示例：`sw/gr-glidelink/examples/ota_qpsk.grc`（两板之间的 QPSK，频谱、瀑布图、同步前后的星座）、`ota_qpsk_pl.grc`（同样的链路 20 MSPS，
-滤波在 PL 中，需 `qpsk` 镜像）、`pl_fft_spectrum.grc`
+示例：`sw/gr-glidelink/examples/ota_qpsk.grc`（两板之间的 QPSK，频谱、瀑布图、同步前后的星座）、`ota_qpsk_pltx.grc`、`ota_qpsk_pl.grc`、`ota_qpsk_plrx.grc`
+（同样的链路 20 MSPS，处理逐步移到 PL 中，需 `qpsk` 镜像；逐步说明见 [`qpsk_tutorial.md`](qpsk_tutorial.md)）、`pl_fft_spectrum.grc`
 （射频 → NCO → FFT 全在 PL 内，20 MSPS 的频谱以每 KEEP 帧一帧送到电脑，需 `dsp` 镜像）、`agc_fast_attack.grc`、`jscc_link_console.grc`。不经 GRC 的脚本在 `sw/gnuradio/`。
 
 电脑上的 GNU Radio 经 USB 网口连续传输，单块板收发同时各 50 MSPS（Windows 原生程序，见 `pc_setup.md` 第 3 节；WSL 中发射约 48 MSPS；板上 UDP 流服务 `glidelink-streamd`，Soapy 模块默认使用）；更高的采样率在 PL 中先做处理或抽取（如 FFT 模块的 KEEP），或在板上运行流程图（`uri=local:` 或板子地址留空）。
