@@ -396,6 +396,30 @@ def project_name(image):
     return "fmcomms2_pynqzu" if image == "demo" else f"fmcomms2_pynqzu_{image}"
 
 
+def timing_failures(image, rpt, t0):
+    """after a failed build: the slots whose paths miss timing (from the routed timing report), with what to do"""
+    if not os.path.isfile(rpt) or os.path.getmtime(rpt) < t0:
+        return
+    txt = open(rpt, encoding="utf8", errors="replace").read()
+    slots = yaml.safe_load(open(os.path.join(HW, "images", image + ".yaml"), encoding="utf8"))["slots"]
+    worst = {}
+    for slack, path in re.findall(r"Slack \(VIOLATED\) :\s+(-[\d.]+)ns.*?\n((?:.*\n){1,8})", txt):
+        m = re.search(r"i_slots/i_mod(\d+)/", path)
+        where = int(m.group(1)) if m else None
+        req = re.search(r"Requirement:\s+([\d.]+)ns", path)
+        mhz = 1000 / float(req.group(1)) if req and float(req.group(1)) > 0 else 0
+        if float(slack) < worst.get(where, (0.0, 0))[0]:
+            worst[where] = (float(slack), mhz)
+    for where, (slack, mhz) in sorted(worst.items(), key=lambda kv: kv[1][0]):
+        if where is None:
+            print(f"  timing not met outside the slots (worst {slack} ns): see the timing report {rpt}")
+        else:
+            s = slots[where]
+            print(f"  timing not met in slot {where} ({s['module']}, clock {mhz:.1f} MHz): worst {slack} ns. "
+                  f"Split the module's longest combinational path over more cycles, or give the slot a lower "
+                  f"clock in hw/images/{image}.yaml (clock: 100)")
+
+
 def cmd_build(a):
     if len(a.what) == 1 and os.path.isfile(os.path.join(HW, "images", a.what[0] + ".yaml")) and not a.name:
         image = a.what[0]
@@ -415,9 +439,14 @@ def cmd_build(a):
     if not vivado or not adi:
         fail("set VIVADO (the vivado executable) and ADI_HDL_DIR (ADI HDL tree, libraries built: hw/README.md) "
              "as environment variables or in glidelink.local.yaml")
+    proj = os.path.join(PROJECT, project_name(image))
+    if finished_run(image, proj):                   # an earlier build ran to the end but was not collected
+        print(f"image {image}: the last Vivado run finished after every source change; using it")
+        collect(image, proj, None)
+        return
     env = dict(os.environ, GLIDELINK_IMAGE=image, ADI_HDL_DIR=adi, ADI_IGNORE_VERSION_CHECK="1")
     log = f"build_{image}.log"
-    print(f"Vivado: image {image} (about an hour; log hw/projects/fmcomms2_pynqzu/{log})")
+    print(f"Vivado: image {image} (about half an hour; log hw/projects/fmcomms2_pynqzu/{log})")
     t0 = time.time()
     steps = ("synth_design", "opt_design", "place_design", "phys_opt_design", "route_design", "write_bitstream")
     seen = set()
@@ -434,24 +463,52 @@ def cmd_build(a):
             if line.startswith("ERROR"):
                 print("  " + line.rstrip(), flush=True)
     p.wait()
-    proj = os.path.join(PROJECT, project_name(image))
     bit = proj + ".runs/impl_1/system_top.bit"
-    hwh = proj + ".gen/sources_1/bd/system/hw_handoff/system.hwh"
     if p.returncode != 0 or not os.path.isfile(bit) or os.path.getmtime(bit) < t0:
+        timing_failures(image, proj + ".runs/impl_1/system_top_timing_summary_routed.rpt", t0)
         fail(f"the build failed (hw/projects/fmcomms2_pynqzu/{log})")
+    collect(image, proj, t0)
+
+
+def slack(proj):
+    """(worst setup slack, worst hold slack) in ns from the routed timing report, None if there is none"""
+    rpt = proj + ".runs/impl_1/system_top_timing_summary_routed.rpt"
+    if not os.path.isfile(rpt):
+        return None
+    txt = open(rpt, encoding="utf8", errors="replace").read()
+    mm = re.search(r"WNS\(ns\)\s+TNS\(ns\).*?\n\s*-+.*?\n\s*(-?[\d.]+)\s+(-?[\d.]+)\s+\d+\s+\d+\s+(-?[\d.]+)", txt, re.S)
+    return (float(mm.group(1)), float(mm.group(3))) if mm else None
+
+
+def finished_run(image, proj):
+    """True when the image's last Vivado run wrote its bitstream after every source of the image changed and
+    met timing (a build whose caller stopped before collecting it)"""
+    bit = proj + ".runs/impl_1/system_top.bit"
+    if not os.path.isfile(bit) or not os.path.isfile(os.path.join(PROJECT, f"gen_{image}", "image.json")):
+        return False
+    s = slack(proj)
+    if s is None or s[0] < 0 or s[1] < 0:
+        return False
+    slots = yaml.safe_load(open(os.path.join(HW, "images", image + ".yaml"), encoding="utf8"))["slots"]
+    srcs = [os.path.join(HW, "images", image + ".yaml")] + glob.glob(os.path.join(PROJECT, "*.tcl"))
+    for d in [os.path.join(HW, "library"), os.path.join(HW, "scripts")] + \
+             [os.path.join(HW, "modules", s["module"]) for s in slots]:
+        for r, _, fs in os.walk(d):
+            srcs += [os.path.join(r, f) for f in fs if "build" not in r.split(os.sep) and "tb" not in r.split(os.sep)]
+    return os.path.getmtime(bit) > max(os.path.getmtime(f) for f in srcs)
+
+
+def collect(image, proj, t0):
+    """the finished run's bitstream, hardware handoff and image description into hw/build/<image>/"""
     dst = os.path.join(HW, "build", image)
     os.makedirs(dst, exist_ok=True)
-    shutil.copy2(bit, os.path.join(dst, f"glidelink_{image}.bit"))
-    shutil.copy2(hwh, os.path.join(dst, f"glidelink_{image}.hwh"))
+    shutil.copy2(proj + ".runs/impl_1/system_top.bit", os.path.join(dst, f"glidelink_{image}.bit"))
+    shutil.copy2(proj + ".gen/sources_1/bd/system/hw_handoff/system.hwh", os.path.join(dst, f"glidelink_{image}.hwh"))
     shutil.copy2(os.path.join(PROJECT, f"gen_{image}", "image.json"), os.path.join(dst, "image.json"))
-    timing = ""
-    rpt = proj + ".runs/impl_1/system_top_timing_summary_routed.rpt"
-    if os.path.isfile(rpt):
-        txt = open(rpt, encoding="utf8", errors="replace").read()
-        mm = re.search(r"WNS\(ns\)\s+TNS\(ns\).*?\n\s*-+.*?\n\s*(-?[\d.]+)\s+(-?[\d.]+)\s+\d+\s+\d+\s+(-?[\d.]+)", txt, re.S)
-        if mm:
-            timing = f", worst setup slack {mm.group(1)} ns, hold {mm.group(3)} ns"
-    print(f"done in {int(time.time() - t0) // 60} min{timing}: hw/build/{image}/glidelink_{image}.bit, .hwh")
+    s = slack(proj)
+    timing = f", worst setup slack {s[0]} ns, hold {s[1]} ns" if s else ""
+    took = f"done in {int(time.time() - t0) // 60} min" if t0 else "collected"
+    print(f"{took}{timing}: hw/build/{image}/glidelink_{image}.bit, .hwh")
     print(f"next: python glidelink.py deploy <board> {image}")
 
 
