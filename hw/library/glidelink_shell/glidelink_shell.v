@@ -112,14 +112,18 @@ module glidelink_shell (
 
   wire        rst = !rstn;
   wire [63:0] time_now;
-  wire [15:0] rx_pkt_len;
+  wire [15:0] rx_pkt_len, rx_pkt_len_a;
   wire        rx_enable, tx_late_drop, host0_rx_hdr, host0_tx_hdr, host1_rx_hdr, host1_tx_hdr;
+  wire        rx_enable_a, tx_late_drop_a, host0_rx_hdr_a, host0_tx_hdr_a, host1_rx_hdr_a, host1_tx_hdr_a;
   wire [31:0] ovf_gray, unf_gray, late_gray, herr_gray, herr1_gray;
   wire  [7:0] tx_dbg_l, tx_dbg_s;
+  wire  [1:0] rx_dbg_l;
+  wire [47:0] rx_dbg_m;
+  wire [31:0] sw_dbg;
   wire [63:0] tx_dbg_time;
   reg  [31:0] dma_ovf = 32'd0, dma_ovf_gray = 32'd0, dma1_ovf = 32'd0, dma1_ovf_gray = 32'd0;
-  wire [N_SNK*4-1:0] route;
-  wire [PRST_W-1:0] port_reset;           // CPU clock: host 0 RX, host 0 TX, slot 0, host 1 RX, host 1 TX, slot 1..
+  wire [N_SNK*4-1:0] route, route_a;
+  wire [PRST_W-1:0] port_reset;          // CPU clock: host 0 RX, host 0 TX, slot 0, host 1 RX, host 1 TX, slot 1..
   (* ASYNC_REG = "TRUE" *) reg [PRST_W-1:0] prst_m1 = 0, prst_s = 0;
   wire        rx_flush = prst_s[0];
   wire        tx_flush = prst_s[1];
@@ -174,12 +178,47 @@ module glidelink_shell (
     .l_clk(l_clk), .adc_valid(adc_valid_i0), .time_now(time_now),
     .ctrl_out(ctrl_out), .rx_overflow_gray(ovf_gray), .tx_underflow_gray(unf_gray),
     .tx_late_gray(late_gray), .tx_dbg_l(tx_dbg_l), .tx_dbg_s(tx_dbg_s), .tx_dbg_time(tx_dbg_time),
+    .rx_dbg({rx_dbg_m[47:32], 14'd0, rx_dbg_l, rx_dbg_m[31:0]}), .sw_dbg(sw_dbg),
     .host0_tx_err_gray(herr_gray), .host0_rx_ovf_gray(dma_ovf_gray),
     .host1_tx_err_gray(herr1_gray), .host1_rx_ovf_gray(dma1_ovf_gray),
-    .rx_pkt_len(rx_pkt_len), .rx_enable(rx_enable), .tx_late_drop(tx_late_drop),
-    .host0_rx_hdr(host0_rx_hdr), .host0_tx_hdr(host0_tx_hdr), .host1_rx_hdr(host1_rx_hdr),
-    .host1_tx_hdr(host1_tx_hdr), .route(route),
+    .rx_pkt_len(rx_pkt_len_a), .rx_enable(rx_enable_a), .tx_late_drop(tx_late_drop_a),
+    .host0_rx_hdr(host0_rx_hdr_a), .host0_tx_hdr(host0_tx_hdr_a), .host1_rx_hdr(host1_rx_hdr_a),
+    .host1_tx_hdr(host1_tx_hdr_a), .route(route_a),
     .port_reset(port_reset));
+
+  // the configuration (CPU clock) into the clocks that use it. Without this, a write landing on the cycle
+  // a packet starts reaches part of the logic and not the rest (the RX buffer's level counter then drifts
+  // from its contents). Level bits: two flip-flops. RX_PKT_LEN (16 bits): two flip-flops, then taken
+  // only after four equal samples, so it never shows a mix of old and new bits. The routes are
+  // synchronised in the switch.
+  assign route = route_a;
+  (* ASYNC_REG = "TRUE" *) reg [4:0] lvl_m1 = 5'b10000, lvl_s = 5'b10000;
+  always @(posedge clk) begin
+    lvl_m1 <= {rx_enable_a, host0_rx_hdr_a, host0_tx_hdr_a, host1_rx_hdr_a, host1_tx_hdr_a};
+    lvl_s <= lvl_m1;
+  end
+  assign {rx_enable, host0_rx_hdr, host0_tx_hdr, host1_rx_hdr, host1_tx_hdr} = lvl_s;
+
+  (* ASYNC_REG = "TRUE" *) reg [15:0] plen_m1 = 16'd4096, plen_m2 = 16'd4096;
+  reg  [15:0] plen_d = 16'd4096, plen_s = 16'd4096;
+  reg   [1:0] plen_stable = 2'd0;
+  always @(posedge clk) begin
+    plen_m1 <= rx_pkt_len_a;
+    plen_m2 <= plen_m1;
+    plen_d <= plen_m2;
+    if (plen_m2 != plen_d)
+      plen_stable <= 2'd0;
+    else if (plen_stable != 2'd3)
+      plen_stable <= plen_stable + 2'd1;
+    else
+      plen_s <= plen_d;
+  end
+  assign rx_pkt_len = plen_s;
+
+  (* ASYNC_REG = "TRUE" *) reg [1:0] late_drop_l = 2'b11;
+  always @(posedge l_clk)
+    late_drop_l <= {late_drop_l[0], tx_late_drop_a};
+  assign tx_late_drop = late_drop_l[1];
 
   // ---------------------------------------------------------------------------
   // stream ports
@@ -194,7 +233,7 @@ module glidelink_shell (
   glidelink_rx_stream i_rx (
     .l_clk(l_clk), .l_rst(l_rst), .adc_valid(adc_valid_i0), .adc_data_i(adc_data_i0),
     .adc_data_q(adc_data_q0), .time_now(time_now), .pkt_len(rx_pkt_len), .enable(rx_enable),
-    .overflow_gray(ovf_gray), .adc_dovf(adc_dovf),
+    .overflow_gray(ovf_gray), .adc_dovf(adc_dovf), .dbg_l(rx_dbg_l), .dbg_m(rx_dbg_m),
     .m_clk(clk), .m_rst(rst), .m_axis_tdata(src_data[0 +: 32]), .m_axis_tuser(src_user[0 +: 72]),
     .m_axis_tlast(src_last[0]), .m_axis_tvalid(src_valid[0]), .m_axis_tready(src_ready[0]));
 
@@ -253,7 +292,8 @@ module glidelink_shell (
     .clk(clk), .rst(rst), .route(route),
     .abort_snk(abort_snk), .abort_src(abort_src),
     .s_valid(src_valid), .s_ready(src_ready), .s_data(src_data), .s_user(src_user), .s_last(src_last),
-    .m_valid(snk_valid), .m_ready(snk_ready), .m_data(snk_data), .m_user(snk_user), .m_last(snk_last));
+    .m_valid(snk_valid), .m_ready(snk_ready), .m_data(snk_data), .m_user(snk_user), .m_last(snk_last),
+    .dbg(sw_dbg));
 
   glidelink_tx_stream i_tx (
     .s_clk(clk), .s_rst(rst || tx_flush), .s_axis_tdata(snk_data[0 +: 32]), .s_axis_tuser(snk_user[0 +: 72]),

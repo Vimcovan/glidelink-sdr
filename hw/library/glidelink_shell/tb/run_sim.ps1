@@ -22,7 +22,8 @@ try {
   $gen = Join-Path $work "gen"
   & python (Join-Path $here "..\..\..\scripts\gen_image.py") (Join-Path $here "..\..\..\images\$Image.yaml") $gen | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "gen_image failed" }
-  $files["glidelink_slots.v"] = Join-Path $gen "glidelink_slots.v"
+  # glidelink_slots.v and each module's generated register file (<top>_slot.v)
+  Get-ChildItem $gen -Recurse -Filter "*.v" | ForEach-Object { $files[$_.Name] = $_.FullName }
   $src = $files.Values
   & "$Bin\xvlog.bat" --nolog -i $gen $src (Join-Path $here "$Top.v") | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "xvlog failed" }

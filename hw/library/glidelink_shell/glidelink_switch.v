@@ -44,7 +44,9 @@ module glidelink_switch #(
   input   [N_SNK-1:0]         m_ready,
   output  [N_SNK*32-1:0]      m_data,
   output  [N_SNK*72-1:0]      m_user,
-  output  [N_SNK-1:0]         m_last
+  output  [N_SNK-1:0]         m_last,
+  output  [31:0]              dbg             // diagnostics: [4:0] source 0 {src_ready, s_valid, routed,
+                                              // connected, in_pkt}, [15:5] sinks active, [31:16] sinks on source 0
 );
 
   localparam [3:0] NONE = 4'hF;
@@ -113,6 +115,14 @@ module glidelink_switch #(
 
   assign s_ready = src_ready;
   assign m_valid = snk_valid;
+
+  reg  [N_SNK-1:0] on_src0;
+  integer d;
+  always @(*)
+    for (d = 0; d < N_SNK; d = d + 1)
+      on_src0[d] = active[d] && cur[d*4 +: 4] == 4'd0;
+  wire [15:0] on16 = on_src0, act16 = active;
+  assign dbg = {on16, act16[10:0], src_ready[0], s_valid[0], routed[0], connected[0], src_in_pkt[0]};
 
   genvar g;
   generate

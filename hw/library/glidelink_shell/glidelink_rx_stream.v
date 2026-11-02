@@ -33,10 +33,12 @@ module glidelink_rx_stream #(
   input     [15:0]  adc_data_i,
   input     [15:0]  adc_data_q,
   input     [63:0]  time_now,             // sample counter, l_clk
-  input     [15:0]  pkt_len,              // samples per packet, 1..2^FIFO_ADDR_WIDTH; quasi-static
-  input             enable,               // quasi-static; packets start only while set
+  input     [15:0]  pkt_len,              // samples per packet, 1..2^FIFO_ADDR_WIDTH; m_clk (synchronised in the shell)
+  input             enable,               // m_clk (synchronised in the shell); packets start only while set
   output    [31:0]  overflow_gray,
   output            adc_dovf,             // to axi_ad9361 (l_clk): a packet was dropped
+  output     [1:0]  dbg_l,                // diagnostics (l_clk): {l_reset, cdc_full}
+  output    [47:0]  dbg_m,                // diagnostics (m_clk): see the end of the file
 
   // processing side
   input             m_clk,
@@ -180,5 +182,12 @@ module glidelink_rx_stream #(
   assign m_axis_tlast = data_out[32];
   assign m_axis_tuser = user;
   assign m_axis_tvalid = in_pkt && !data_empty;
+
+  // diagnostics: [13:0] data FIFO level, [18:14] header FIFO level, [19] data_empty,
+  // [20] hdr_empty, [21] in_pkt, [22] dropping, [23] remaining == 0, [24] cdc_empty,
+  // [25] m_reset, [26] tvalid, [27] tready, [28] enable, [47:32] remaining
+  assign dbg_m = {remaining, 3'd0, enable, m_axis_tready, m_axis_tvalid, m_reset, cdc_empty,
+                  remaining == 16'd0, dropping, in_pkt, hdr_empty, data_empty, hdr_level, wr_level};
+  assign dbg_l = {l_reset, cdc_full};
 
 endmodule

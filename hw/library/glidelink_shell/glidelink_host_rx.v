@@ -22,7 +22,7 @@ module glidelink_host_rx #(
 ) (
   input             clk,
   input             rst,
-  input             hdr_en,                 // quasi-static; change only while idle
+  input             hdr_en,                 // clk (synchronised in the shell); change only while idle
 
   input             s_valid,
   output            s_ready,

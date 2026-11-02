@@ -41,7 +41,7 @@ module glidelink_tx_stream #(
   output    [15:0]  dac_data_i,
   output    [15:0]  dac_data_q,
   input     [63:0]  time_now,             // sample counter, l_clk
-  input             late_drop,            // quasi-static
+  input             late_drop,            // l_clk (synchronised in the shell)
   output    [31:0]  underflow_gray,
   output    [31:0]  late_gray,
   output            dac_dunf,             // to axi_ad9361: underflow

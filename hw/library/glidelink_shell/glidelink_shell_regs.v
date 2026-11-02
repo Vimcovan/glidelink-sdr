@@ -26,6 +26,14 @@
 //                           hdr_empty, eob, first_wait, state[1:0]} (sample clock), [15:8]
 //                           {cdc_full, buf_empty, s_in_pkt, data_full, hdr_full} (processing clock)
 //   0x06C / 0x070 TX_WAIT_LO / HI  RO  send time of the packet the TX streamer holds (diagnostics)
+//   0x074  RX_DEBUG_LO  RO  RX streamer state (diagnostics, processing clock): [13:0] data FIFO
+//                           level, [18:14] header FIFO level, [19] data empty, [20] header empty,
+//                           [21] in packet, [22] dropping, [23] between packets, [24] crossing FIFO
+//                           empty, [25] reset, [26] tvalid, [27] tready, [28] enable
+//   0x078  RX_DEBUG_HI  RO  [1:0] {reset, crossing FIFO full} (sample clock), [31:16] samples left
+//                           in the current packet
+//   0x07C  SW_DEBUG     RO  stream switch (diagnostics): [4:0] RF RX source {ready, valid, routed,
+//                           connected, inside a packet}, [15:5] sinks active, [31:16] sinks on RF RX
 //   0x050  RX_PKT_LEN   RW  samples per RX packet (default 4096)
 //   0x054  CONFIG       RW  bit 0: RX enable (default 1), bit 1: drop late TX packets (default 1),
 //                           bit 2: host port 0 RX adds packet headers, bit 3: host port 0 TX
@@ -89,12 +97,14 @@ module glidelink_shell_regs #(
   input      [7:0]  tx_dbg_l,
   input      [7:0]  tx_dbg_s,
   input     [63:0]  tx_dbg_time,
+  input     [63:0]  rx_dbg,                 // diagnostics, quasi-static
+  input     [31:0]  sw_dbg,
   input     [31:0]  host0_tx_err_gray,
   input     [31:0]  host0_rx_ovf_gray,
   input     [31:0]  host1_tx_err_gray,
   input     [31:0]  host1_rx_ovf_gray,
 
-  // configuration (CPU clock, quasi-static)
+  // configuration (CPU clock; the shell synchronises it into the clocks that use it)
   output    [15:0]  rx_pkt_len,
   output            rx_enable,
   output            tx_late_drop,
@@ -107,7 +117,7 @@ module glidelink_shell_regs #(
 );
 
   localparam [31:0] ID = 32'h474C4B53;
-  localparam [31:0] VERSION = 32'h00010500;    // 1.5.0: URAM buffers, RX samples 16-bit full scale
+  localparam [31:0] VERSION = 32'h00010502;    // 1.5.2: configuration synchronised into the clocks that use it; 1.5.1: RX streamer and switch diagnostics; 1.5.0: URAM buffers, RX samples 16-bit full scale
 
   // ---------------------------------------------------------------------------
   // AXI4-Lite: one outstanding write and one outstanding read
@@ -293,6 +303,8 @@ module glidelink_shell_regs #(
   reg  [31:0] host1_tx_err = 0, host1_rx_ovf = 0;
   (* ASYNC_REG = "TRUE" *) reg [15:0] txd_m1 = 16'd0, txd_s = 16'd0;    // diagnostics, quasi-static
   (* ASYNC_REG = "TRUE" *) reg [63:0] txt_m1 = 64'd0, txt_s = 64'd0;
+  (* ASYNC_REG = "TRUE" *) reg [63:0] rxd_m1 = 64'd0, rxd_s = 64'd0;
+  (* ASYNC_REG = "TRUE" *) reg [31:0] swd_m1 = 32'd0, swd_s = 32'd0;
   always @(posedge s_axi_aclk) begin
     ovf_g_m1 <= rx_overflow_gray;
     ovf_g_s <= ovf_g_m1;
@@ -303,6 +315,10 @@ module glidelink_shell_regs #(
     txd_s <= txd_m1;
     txt_m1 <= tx_dbg_time;
     txt_s <= txt_m1;
+    rxd_m1 <= rx_dbg;
+    rxd_s <= rxd_m1;
+    swd_m1 <= sw_dbg;
+    swd_s <= swd_m1;
     late_g_s <= late_g_m1;
     rx_overflow <= gray2bin(ovf_g_s);
     tx_underflow <= gray2bin(unf_g_s);
@@ -358,6 +374,9 @@ module glidelink_shell_regs #(
           11'h01A: rdata <= {16'd0, txd_s};
           11'h01B: rdata <= txt_s[31:0];
           11'h01C: rdata <= txt_s[63:32];
+          11'h01D: rdata <= rxd_s[31:0];
+          11'h01E: rdata <= rxd_s[63:32];
+          11'h01F: rdata <= swd_s;
           default: rdata <= (s_axi_araddr[12] && s_axi_araddr[11:2] < N_SNK) ?
                             {28'd0, routes[s_axi_araddr[11:2]*4 +: 4]} : 32'd0;
         endcase
