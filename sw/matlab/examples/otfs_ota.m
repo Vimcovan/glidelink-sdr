@@ -34,13 +34,14 @@ if ~exist("emulateChannel", "var")
 end
 paths = [0    1.0    0     0                    % emulated paths: delay (us), gain, Doppler (Hz),
          1.7  0.6  1260    1.0                  %   phase (rad)
-         4.3  0.45 -690   -2.0];
+         4.3  0.45 -690   -2.0
+5.7 0.3 1330 1.7];
 
 % AGC for this waveform (run_agc.m sets gainMode = "agc"): frames back to back (continuous, nearly
 % constant average power), so the slow-attack AGC. The OTFS block is a sum of many symbols (PAPR
 % about 10 dB, more with the boosted pilot): the target window is set low, and the power is
 % averaged over half a frame so the pilot pulses do not move the gain.
-agcMode = "slow_attack";
+agcMode = "fast_attack";
 agcParams = {
     "adi,agc-inner-thresh-high", 16            % target window for the average power: -16 .. -19 dBFS
     "adi,agc-inner-thresh-low", 19
@@ -119,7 +120,11 @@ for ph = 1:sps
         best = max(cd(1:2 * P));  y = yd;  c = cd;
     end
 end
-[~, e0] = max(c(1:P));
+% the preamble's two equal halves give side peaks of half height 127 symbols either side of the main
+% peak: within one frame of samples the main peak can lie just beyond the end while its side peak is
+% inside, so search two frames (one whole main peak) and fold it back into the first
+[~, e0] = max(c(1:2 * P));
+e0 = mod(e0 - 1, P) + 1;
 starts = (e0 - numel(pre) + 1):P:(numel(y) - P + 1);
 % frame starts and one frequency offset for all frames: with several paths of different Doppler the
 % preamble gives a mix of them that changes from frame to frame (the paths' phases rotate); one
@@ -215,8 +220,8 @@ result = struct("name", "OTFS 64x32", "frames", nFrames, "bits", nBits, "errors"
 fig = figure(Name="GlideLink OTFS", Color="w", Position=[100 100 1300 800]);
 tl = tiledlayout(fig, 2, 3, TileSpacing="compact");
 title(tl, sprintf("OTFS %d x %d, QPSK, %g Msymbol/s (radio %g MSPS) at %g MHz, over the air%s", M, N, ...
-    fs / 1e6, fsr / 1e6, fc / 1e6, string(ifelse(emulateChannel, ...
-    " (with an emulated 3-path channel: fractional delays and Doppler)", ""))));
+    fs / 1e6, fsr / 1e6, fc / 1e6, string(ifelse(emulateChannel, sprintf( ...
+    " (with an emulated %d-path channel: fractional delays and Doppler)", size(paths, 1)), ""))));
 nexttile;
 [pxx, fq] = pwelch(yr, hann(1024), 512, 1024, fsr, "centered");
 plot(fq / 1e3, 10 * log10(pxx / max(pxx)), LineWidth=1.2);  grid on;  ylim([-60 3]);
