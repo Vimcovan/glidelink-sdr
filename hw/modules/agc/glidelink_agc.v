@@ -3,9 +3,10 @@
 // Description and registers: module.yaml; reference model: model.py.
 //
 // One sample at a time, 5 cycles each (take, xI g, xQ g on one multiplier
-// (1 DSP slice) with yI saturated, yQ saturated, magnitude / gain update /
-// output), so the gain used for a sample is the one updated by the sample
-// before it, as in the software recursion (40 MSPS at 200 MHz):
+// (1 DSP slice) with yI saturated, yQ saturated, magnitude / output; the gain
+// update in the cycle after, before the next sample's multiply), so the gain
+// used for a sample is the one updated by the sample before it, as in the
+// software recursion (40 MSPS at 200 MHz):
 //   y = sat16((x * g + 2^15) >> 16), m = max(|yI|, |yQ|) + (3 min >> 3),
 //   g += (2 (REFERENCE - m)) >>> RATE_SHIFT, g within 0 .. MAX_GAIN.
 // Disabled: samples pass unchanged, the gain holds. Soft reset and flush set
@@ -48,6 +49,8 @@ module glidelink_agc (
   reg  signed [42:0] p = 0;                 // x * g, I then Q
   reg  signed [15:0] yi = 0, yq = 0;
   reg  [16:0] mag = 17'd0;
+  reg  [16:0] mag_r = 17'd0;                // the magnitude, registered in S_UPD
+  reg         upd = 1'b0;                   // gain update due (the cycle after S_UPD)
 
   reg         o_valid = 1'b0;
   reg  [31:0] o_data = 32'd0;
@@ -77,7 +80,7 @@ module glidelink_agc (
   wire [16:0] amax = ai > aq ? ai : aq;
   wire [16:0] amin = ai > aq ? aq : ai;
   wire [18:0] amin3 = {2'd0, amin} + {1'b0, amin, 1'b0};
-  wire signed [19:0] err = $signed({4'd0, reference}) - $signed({3'd0, mag});
+  wire signed [19:0] err = $signed({4'd0, reference}) - $signed({3'd0, mag_r});
   wire signed [27:0] delta = $signed({{7{err[19]}}, err, 1'b0}) >>> rate_shift;
   wire signed [28:0] gsum = $signed({3'd0, g}) + delta;
   wire        out_free = !o_valid || m_axis_tready;
@@ -88,9 +91,13 @@ module glidelink_agc (
     if (rst) begin
       st <= S_TAKE;
       o_valid <= 1'b0;
+      upd <= 1'b0;
       g <= gain;
     end else begin
-      if (gain_wr)
+      upd <= 1'b0;
+      if (upd)                              // before the next sample's S_MULI
+        g <= gsum < 0 ? 26'd0 : gsum > $signed({3'd0, max_gain}) ? max_gain : gsum[25:0];
+      if (gain_wr)                          // a write wins over the update
         g <= gain;
       case (st)
         S_TAKE:
@@ -110,12 +117,12 @@ module glidelink_agc (
           yq <= byp ? xq : sat(p);
           st <= S_UPD;
         end
-        default: begin                      // S_UPD: magnitude, gain update, output
+        default: begin                      // S_UPD: magnitude, output; the gain next cycle
           if (out_free) begin
             o_valid <= 1'b1;
             o_data <= {yq, yi};
-            if (!byp && !gain_wr)
-              g <= gsum < 0 ? 26'd0 : gsum > $signed({3'd0, max_gain}) ? max_gain : gsum[25:0];
+            mag_r <= mag;
+            upd <= !byp && !gain_wr;
             st <= S_TAKE;
           end
         end
