@@ -5,7 +5,7 @@
 
 | 步骤 | 流程图 | 发射：电脑做什么 / PL 做什么 | 接收：PL 做什么 / 电脑做什么 | 电脑收 / 发（实测） | 符号 EVM（实测） |
 |---|---|---|---|---|---|
-| 0 | `ota_qpsk.grc` | 调制、成形滤波 / — | — / AGC、FLL、时钟同步、Costas | 收不动：先 12 MSPS，十几秒后卡死；发 14～18 MSPS | 不锁定 |
+| 0 | `ota_qpsk.grc` | 调制、成形滤波 / — | — / AGC、FLL、时钟同步、Costas | 收 12～16 MSPS（应为 20，持续溢出），时钟同步块时常卡住或退出；发 14～18 MSPS | 时锁时停 |
 | 1 | `ota_qpsk_pltx.grc` | 送符号 / 插值成形 | — / 同上 | 收 7～16 MSPS（应为 20，持续溢出，每次运行不同，偶尔崩溃）；发 5 MSPS | 约 −19 dB |
 | 2 | `ota_qpsk_pl.grc` | 同上 | 低通抽取 / AGC、FLL、时钟同步、Costas | 收 10 MSPS；发 5 MSPS | 约 −19.5 dB |
 | 3 | `ota_qpsk_plrx.grc` | 同上 | 抽取、AGC、FLL、匹配滤波、符号同步、Costas / 只看星座 | 收 5 MSPS；发 5 MSPS | 约 −19.6 dB |
@@ -57,10 +57,13 @@
 点运行（F6）。20 MSPS 下电脑跟不上：
 
 - 控制台一直打印 `sO`：`O` 是接收溢出，板上的 DMA 因为电脑读得慢而丢了样点。
-- 实测电脑起初每秒只收到约 12 MSPS，十几秒后接收完全停住，频谱、星座图不再刷新；发射也只送出 14～18 MSPS，空中信号时有时无。
-  原因见 [`known_issues.md`](known_issues.md) 中 `ota_qpsk.grc` 一条：FLL 单核只能处理约 16 MSPS，信号断续又让时钟同步卡住。
+- 电脑每秒只收到 12～16 M 个样点：FLL（`fll_band_edge`，sps 4）单核只能处理约 16 MSPS，是接收链中最慢的块。发射端的调制链有时也到
+  不了 20 MSPS（只送出 14～18 MSPS），发射板断供，空中信号时有时无。
+- GNU Radio（3.10.12.0）的时钟同步块 `pfb_clock_sync_ccf` 读输入时不检查边界，误差项也不限幅：输入幅度冲高时它会停在同一段输入上
+  不断输出、不再消耗输入，接收源被堵住，频谱、星座图不再刷新；偏得再多就读到输入缓冲区之外，进程在 `volk.dll` 中访问违规退出。
+  所以有时星座能锁上（如下图），有时停住或退出。详见 [`known_issues.md`](known_issues.md) 中 `pfb_clock_sync_ccf` 一条。
 
-![第 0 步在 20 MSPS 下运行约 40 秒：瀑布图在 10 秒处停住，同步后的星座（右下）没有点](img/qpsk_tutorial/step0_run_20msps.png)
+![第 0 步在 20 MSPS 下运行：电脑每秒只收到约 16 M 个样点，控制台一直打印 sO](img/qpsk_tutorial/step0_run_20msps.png)
 
 把 `samp_rate` 改成 `5e6`（符号率随之降到 1.25 Msymbol/s）再运行，同一个流程图就能稳定工作：电脑收发各 5 MSPS，同步后的星座清晰，
 实测 EVM 约 −26 dB（带宽窄，噪声小，所以比后面 20 MSPS 的结果好）。流程图本身没有问题，问题是电脑要在 20 MSPS 上做全部处理。
@@ -93,8 +96,8 @@
 
 - 电脑稳定发出 5 MSPS，发射端的处理不再受电脑限制。
 - 接收端仍然是 20 MSPS 的纯软件处理，控制台持续打印 `O`。三次运行中电脑每秒收到的样点分别约为 16.4、7.3、7.5 M（GNU Radio 每个块一个线程，
-  落在能效核上的块更慢，所以每次不同）；第一次运行 35 秒左右进程崩溃，是丢样严重时 GNU Radio 时钟同步块的问题
-  （[`known_issues.md`](known_issues.md) 中 `ota_qpsk.grc` 一条）。没崩溃时星座能锁上，EVM 约 −19 dB，但一直在丢样点。瓶颈在接收端。
+  落在能效核上的块更慢，所以每次不同）；第一次运行 35 秒左右进程崩溃，是 GNU Radio 时钟同步块越界读输入
+  （[`known_issues.md`](known_issues.md) 中 `pfb_clock_sync_ccf` 一条）。没崩溃时星座能锁上，EVM 约 −19 dB，但一直在丢样点。瓶颈在接收端。
 
 ![第 1 步运行中：星座能锁上，但接收一直在丢样点](img/qpsk_tutorial/step1_run.png)
 
@@ -172,5 +175,5 @@ python sw/tests/flowgraph_probe.py sw/gr-glidelink/examples/ota_qpsk_pl.grc --se
 | GRC 中找不到 GlideLink 的块，或块的参数和教程不一样 | 重新安装 gr-glidelink：`D:\radioconda\python.exe sw\gr-glidelink\install_conda.py`，再重启 GRC |
 | 运行时报找不到某个模块的槽位 | 板上不是 `qpsk` 镜像：`python glidelink.py status <板子地址>` 查看，按第 1 节部署 |
 | 控制台一直打印 `O` | 电脑来不及处理：降低 `samp_rate`，或把更多处理搬到 PL |
-| 运行时进程偶尔直接退出（第 0～2 步） | 第 0、1 步丢样严重时，GNU Radio 的时钟同步块会崩溃（[`known_issues.md`](known_issues.md)）；第 2 步实测 7 次中有 1 次刚启动就退出（当时没有丢样，原因未查明），重新运行即可。第 3 步电脑上不再运行这些接收块 |
+| 运行时接收停住或进程直接退出（第 0～2 步） | GNU Radio（3.10.12.0）时钟同步块 `pfb_clock_sync_ccf` 的缺陷：不再消耗输入，或越界读输入（[`known_issues.md`](known_issues.md)）。第 2 步启动时约 7% 的运行会这样，重新运行即可。第 3 步电脑上不再运行这些接收块 |
 | 想确认某个 PL 模块和电脑上的算法一致 | 每个模块都有一个同名的软件块（名字带 "(software)"），可以替换 PL 块对照；或用 `sw/tests/gr_module_swap.py <模块 ID>` 在板上逐样点比较（[`module_guide.md`](module_guide.md) 第 4 节） |

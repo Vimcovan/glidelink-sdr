@@ -32,7 +32,7 @@ options:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 8]
+    coordinate: [64, 168.0]
     rotation: 0
     state: enabled
 
@@ -46,7 +46,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [240, 8]
+    coordinate: [296, 172.0]
     rotation: 0
     state: enabled
 - name: freq
@@ -58,21 +58,21 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [576, 8]
+    coordinate: [1376, 172.0]
     rotation: 0
     state: enabled
 - name: pcores
   id: variable
   parameters:
-    comment: 'logical CPUs of the performance cores of this PC (i5-14600KF: 0-11);
-      the FLL and clock sync run about twice as fast there as on an efficiency core
-      (fll_band_edge 16 against 7 MSPS) and need 10 MSPS'
+    comment: "logical CPUs of the performance cores of this PC (i5-14600KF: 0-11);\
+      \ \nthe FLL and clock sync run about twice as fast there as on an efficiency\
+      \ core (fll_band_edge 16 against 7 MSPS) and need 10 MSPS"
     value: '[2, 3, 4, 5, 6, 7, 8, 9, 10, 11]'
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 176]
+    coordinate: [64, 316.0]
     rotation: 0
     state: enabled
 - name: qpsk
@@ -84,7 +84,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1208, 176]
+    coordinate: [1528, 172.0]
     rotation: 0
     state: enabled
 - name: rrc_taps
@@ -96,7 +96,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 296]
+    coordinate: [624, 172.0]
     rotation: 0
     state: enabled
 - name: rx_gain
@@ -117,7 +117,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [360, 296]
+    coordinate: [1232, 288.0]
     rotation: 0
     state: enabled
 - name: rx_sps
@@ -129,7 +129,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [536, 296]
+    coordinate: [1152, 172.0]
     rotation: 0
     state: enabled
 - name: samp_rate
@@ -141,7 +141,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [784, 296]
+    coordinate: [952, 172.0]
     rotation: 0
     state: enabled
 - name: sps
@@ -153,7 +153,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1008, 296]
+    coordinate: [848, 308.0]
     rotation: 0
     state: enabled
 - name: tx_atten
@@ -174,7 +174,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1408, 296]
+    coordinate: [1376, 288.0]
     rotation: 0
     state: enabled
 - name: after
@@ -266,7 +266,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [3400, 776]
+    coordinate: [1560, 932.0]
     rotation: 0
     state: enabled
 - name: agc
@@ -286,7 +286,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1128, 776]
+    coordinate: [752, 708.0]
     rotation: 0
     state: enabled
 - name: before
@@ -378,7 +378,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1528, 952]
+    coordinate: [992, 868.0]
     rotation: 0
     state: enabled
 - name: bits
@@ -398,7 +398,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 496]
+    coordinate: [64, 460.0]
     rotation: 0
     state: enabled
 - name: clock
@@ -406,9 +406,9 @@ blocks:
   parameters:
     affinity: pcores
     alias: ''
-    comment: 'on the performance cores (variable pcores); max_dev 0.05: the two boards''
-      clocks differ by at most 200 ppm (rate 0.0004 at 2 samples per symbol); 1.5
-      let the loop settle at the bound (false lock)'
+    comment: "on the performance cores (variable pcores); \nmax_dev 0.05: the two\
+      \ boards' clocks differ by at most 200 ppm (rate 0.0004 at 2 samples per symbol);\
+      \ \n1.5 let the loop settle at the bound (false lock)"
     filter_size: '32'
     init_phase: '16'
     loop_bw: 6.28 / 200
@@ -423,7 +423,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1912, 776]
+    coordinate: [1264, 704.0]
     rotation: 0
     state: enabled
 - name: costas
@@ -441,7 +441,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [3096, 776]
+    coordinate: [1584, 688.0]
     rotation: 0
     state: enabled
 - name: fll
@@ -461,7 +461,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1528, 776]
+    coordinate: [992, 696.0]
     rotation: 0
     state: enabled
 - name: rx
@@ -482,7 +482,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [816, 776]
+    coordinate: [416, 728.0]
     rotation: 0
     state: enabled
 - name: rx_fir
@@ -499,7 +499,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [320, 776]
+    coordinate: [120, 940.0]
     rotation: 0
     state: enabled
 - name: rx_radio
@@ -522,7 +522,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 776]
+    coordinate: [48, 708.0]
     rotation: 0
     state: enabled
 - name: scale
@@ -540,7 +540,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [824, 496]
+    coordinate: [528, 600.0]
     rotation: 0
     state: enabled
 - name: spectrum
@@ -621,7 +621,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1128, 1080]
+    coordinate: [744, 980.0]
     rotation: 0
     state: enabled
 - name: symbols
@@ -641,7 +641,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [488, 496]
+    coordinate: [392, 476.0]
     rotation: 0
     state: enabled
 - name: tx
@@ -661,7 +661,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1048, 496]
+    coordinate: [712, 440.0]
     rotation: 0
     state: enabled
 - name: tx_fir
@@ -678,7 +678,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1464, 496]
+    coordinate: [1024, 596.0]
     rotation: 0
     state: enabled
 - name: tx_radio
@@ -701,7 +701,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1904, 496]
+    coordinate: [1520, 460.0]
     rotation: 0
     state: enabled
 - name: unpack
@@ -720,7 +720,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [192, 496]
+    coordinate: [160, 612.0]
     rotation: 0
     state: enabled
 - name: waterfall
@@ -781,7 +781,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1128, 928]
+    coordinate: [744, 844.0]
     rotation: 0
     state: enabled
 

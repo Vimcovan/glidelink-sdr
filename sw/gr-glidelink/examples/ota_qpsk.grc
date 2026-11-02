@@ -29,7 +29,7 @@ options:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 8]
+    coordinate: [208, 40.0]
     rotation: 0
     state: enabled
 
@@ -43,7 +43,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [248, 8]
+    coordinate: [440, 36.0]
     rotation: 0
     state: enabled
 - name: qpsk
@@ -55,7 +55,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [424, 8]
+    coordinate: [560, 36.0]
     rotation: 0
     state: enabled
 - name: rrc_taps
@@ -67,7 +67,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [792, 8]
+    coordinate: [776, 36.0]
     rotation: 0
     state: enabled
 - name: rx_gain
@@ -88,7 +88,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1136, 8]
+    coordinate: [1176, 40.0]
     rotation: 0
     state: enabled
 - name: samp_rate
@@ -100,7 +100,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1312, 8]
+    coordinate: [976, 36.0]
     rotation: 0
     state: enabled
 - name: sps
@@ -112,7 +112,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1456, 8]
+    coordinate: [1088, 36.0]
     rotation: 0
     state: enabled
 - name: tx_atten
@@ -133,7 +133,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1576, 8]
+    coordinate: [1328, 40.0]
     rotation: 0
     state: enabled
 - name: after
@@ -225,7 +225,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1576, 432]
+    coordinate: [1376, 580.0]
     rotation: 0
     state: enabled
 - name: agc
@@ -245,7 +245,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [304, 432]
+    coordinate: [560, 436.0]
     rotation: 0
     state: enabled
 - name: before
@@ -337,7 +337,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [592, 584]
+    coordinate: [800, 580.0]
     rotation: 0
     state: enabled
 - name: bits
@@ -357,7 +357,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 208]
+    coordinate: [200, 228.0]
     rotation: 0
     state: enabled
 - name: clock
@@ -380,7 +380,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [976, 432]
+    coordinate: [1056, 456.0]
     rotation: 0
     state: enabled
 - name: costas
@@ -398,7 +398,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1280, 432]
+    coordinate: [1368, 400.0]
     rotation: 0
     state: enabled
 - name: fll
@@ -418,7 +418,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [592, 432]
+    coordinate: [792, 424.0]
     rotation: 0
     state: enabled
 - name: mod
@@ -440,7 +440,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [192, 208]
+    coordinate: [560, 236.0]
     rotation: 0
     state: enabled
 - name: rx
@@ -461,7 +461,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 432]
+    coordinate: [232, 456.0]
     rotation: 0
     state: enabled
 - name: scale
@@ -479,7 +479,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [496, 208]
+    coordinate: [968, 264.0]
     rotation: 0
     state: enabled
 - name: spectrum
@@ -560,7 +560,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [304, 584]
+    coordinate: [528, 580.0]
     rotation: 0
     state: enabled
 - name: tx
@@ -580,7 +580,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [672, 208]
+    coordinate: [1408, 224.0]
     rotation: 0
     state: enabled
 - name: waterfall
@@ -641,7 +641,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [304, 736]
+    coordinate: [528, 700.0]
     rotation: 0
     state: enabled
 

@@ -3,58 +3,116 @@ options:
     author: GlideLink
     catch_exceptions: 'True'
     category: '[GRC Hier Blocks]'
-    description: 'QPSK between the two boards at 20 MSPS (5 Msymbol/s), the whole receiver in the PL
-      (qpsk image, hw/images/qpsk.yaml, on both boards): RF -> low-pass and decimation by 2 -> AGC ->
-      FLL band-edge -> RRC matched filter -> symbol sync (Gardner) -> Costas loop -> PC, one sample per
-      symbol. The TX board''s FIR interpolates the PC''s symbols by 4 with an RRC pulse.'
+    cmake_opt: ''
+    comment: ''
+    copyright: ''
+    description: 'QPSK between the two boards at 20 MSPS (5 Msymbol/s), the whole
+      receiver in the PL (qpsk image, hw/images/qpsk.yaml, on both boards): RF ->
+      low-pass and decimation by 2 -> AGC -> FLL band-edge -> RRC matched filter ->
+      symbol sync (Gardner) -> Costas loop -> PC, one sample per symbol. The TX board''s
+      FIR interpolates the PC''s symbols by 4 with an RRC pulse.'
+    gen_cmake: 'On'
+    gen_linking: dynamic
     generate_options: qt_gui
+    hier_block_src_path: '.:'
     id: glidelink_ota_qpsk_plrx
+    max_nouts: '0'
     output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
     run: 'True'
     run_command: '{python} -u {filename}'
     run_options: prompt
+    sizing_mode: fixed
+    thread_safe_setters: ''
     title: GlideLink OTA QPSK (receiver in the PL)
     window_size: (1400,1000)
   states:
-    coordinate: [8, 8]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [64, 176.0]
     rotation: 0
     state: enabled
 
 blocks:
-- name: samp_rate
-  id: variable
+- name: costas_freq
+  id: variable_function_probe
   parameters:
-    comment: RF sample rate (both boards)
-    value: 20e6
+    block_id: costas
+    comment: ''
+    function_args: '''FREQ'''
+    function_name: read
+    poll_rate: '1'
+    value: '0'
   states:
-    coordinate: [240, 8]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1368, 336.0]
     rotation: 0
     state: enabled
-- name: sps
-  id: variable
+- name: costas_hz
+  id: variable_qtgui_label
   parameters:
-    comment: 'samples per symbol at the RF rate (4, rrc_interp in the image)'
-    value: '4'
+    comment: ''
+    formatter: None
+    gui_hint: 2,0,1,1
+    label: Costas residual frequency (Hz)
+    type: real
+    value: ((costas_freq - 2**32) if costas_freq >= 2**31 else costas_freq) / 2**32
+      * samp_rate / sps
   states:
-    coordinate: [456, 8]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [752, 332.0]
     rotation: 0
     state: enabled
 - name: decim
   id: variable
   parameters:
-    comment: 'RX decimation in the PL (2, lp_decim in the image)'
+    comment: RX decimation in the PL (2, lp_decim in the image)
     value: '2'
   states:
-    coordinate: [864, 8]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [848, 180.0]
     rotation: 0
     state: enabled
-- name: rx_sps
-  id: variable
+- name: fll_freq
+  id: variable_function_probe
   parameters:
-    comment: samples per symbol on the PC (RX)
-    value: sps // decim
+    block_id: fll
+    comment: FLL frequency register, read once a second
+    function_args: '''FREQ'''
+    function_name: read
+    poll_rate: '1'
+    value: '0'
   states:
-    coordinate: [1200, 8]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [944, 336.0]
+    rotation: 0
+    state: enabled
+- name: fll_khz
+  id: variable_qtgui_label
+  parameters:
+    comment: ''
+    formatter: None
+    gui_hint: 1,0,1,1
+    label: FLL frequency correction (kHz)
+    type: real
+    value: ((fll_freq - 2**32) if fll_freq >= 2**31 else fll_freq) / 2**32 * samp_rate
+      / decim / 1e3
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [376, 332.0]
     rotation: 0
     state: enabled
 - name: freq
@@ -63,7 +121,10 @@ blocks:
     comment: ''
     value: 915e6
   states:
-    coordinate: [1456, 8]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1368, 180.0]
     rotation: 0
     state: enabled
 - name: qpsk
@@ -72,25 +133,10 @@ blocks:
     comment: ''
     value: digital.constellation_qpsk().base()
   states:
-    coordinate: [8, 176]
-    rotation: 0
-    state: enabled
-- name: tx_atten
-  id: variable_qtgui_range
-  parameters:
-    comment: ''
-    gui_hint: 0,0,1,1
-    label: TX attenuation (dB)
-    min_len: '200'
-    orient: QtCore.Qt.Horizontal
-    rangeType: float
-    start: '0'
-    step: '1'
-    stop: '89'
-    value: '40'
-    widget: counter_slider
-  states:
-    coordinate: [376, 176]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1496, 180.0]
     rotation: 0
     state: enabled
 - name: rx_gain
@@ -108,254 +154,46 @@ blocks:
     value: '40'
     widget: counter_slider
   states:
-    coordinate: [592, 176]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [240, 328.0]
     rotation: 0
     state: enabled
-
-# ---------------------------------------------------------------- TX board
-- name: bits
-  id: analog_random_source_x
+- name: rx_sps
+  id: variable
   parameters:
-    comment: ''
-    max: '256'
-    min: '0'
-    num_samps: '10000'
-    repeat: 'True'
-    type: byte
+    comment: samples per symbol on the PC (RX)
+    value: sps // decim
   states:
-    coordinate: [8, 552]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1152, 180.0]
     rotation: 0
     state: enabled
-- name: unpack
-  id: blocks_packed_to_unpacked_xx
+- name: samp_rate
+  id: variable
   parameters:
-    bits_per_chunk: '2'
-    comment: ''
-    endianness: gr.GR_MSB_FIRST
-    num_ports: '1'
-    type: byte
+    comment: RF sample rate (both boards)
+    value: 20e6
   states:
-    coordinate: [192, 552]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [296, 180.0]
     rotation: 0
     state: enabled
-- name: symbols
-  id: digital_chunks_to_symbols_xx
+- name: sps
+  id: variable
   parameters:
-    comment: ''
-    dimension: '1'
-    in_type: byte
-    num_ports: '1'
-    out_type: complex
-    symbol_table: qpsk.points()
+    comment: samples per symbol at the RF rate (4, rrc_interp in the image)
+    value: '4'
   states:
-    coordinate: [488, 552]
-    rotation: 0
-    state: enabled
-- name: scale
-  id: blocks_multiply_const_vxx
-  parameters:
-    comment: room for the RRC overshoot
-    const: '0.4'
-    type: complex
-    vlen: '1'
-  states:
-    coordinate: [824, 552]
-    rotation: 0
-    state: enabled
-- name: tx
-  id: glidelink_sink
-  parameters:
-    address: '"192.168.4.1"'
-    atten: tx_atten
-    bandwidth: '0'
-    comment: 'symbols (1 per symbol, samp_rate / sps) into the PL: host0_tx'
-    freq: freq
-    samp_rate: samp_rate
-  states:
-    coordinate: [1048, 552]
-    rotation: 0
-    state: enabled
-- name: tx_fir
-  id: glidelink_rrc_interp
-  parameters:
-    args: '"driver=glidelink,uri=ip:192.168.4.1"'
-    comment: 'RRC pulse, interpolation by 4 (coefficients fixed in the image)'
-    slot: '-1'
-  states:
-    coordinate: [1464, 552]
-    rotation: 0
-    state: enabled
-- name: tx_radio
-  id: glidelink_radio
-  parameters:
-    address: '"192.168.4.1"'
-    atten: tx_atten
-    bandwidth: '0'
-    comment: TX board RF
-    gain: '0'
-    gain_mode: '"manual"'
-    rx_freq: freq - 10e6
-    samp_rate: samp_rate
-    tx_freq: freq
-  states:
-    coordinate: [1904, 552]
-    rotation: 0
-    state: enabled
-
-# ---------------------------------------------------------------- RX board
-- name: rx_radio
-  id: glidelink_radio
-  parameters:
-    address: '"192.168.3.1"'
-    atten: '89'
-    bandwidth: '0'
-    comment: RX board RF
-    gain: rx_gain
-    gain_mode: '"slow_attack"'
-    rx_freq: freq
-    samp_rate: samp_rate
-    tx_freq: '0'
-  states:
-    coordinate: [8, 832]
-    rotation: 0
-    state: enabled
-- name: rx
-  id: glidelink_source
-  parameters:
-    address: '"192.168.3.1"'
-    bandwidth: '0'
-    comment: 'host0_rx: one sample per symbol (samp_rate / sps) reaches the PC'
-    freq: freq
-    gain: rx_gain
-    gain_mode: '"slow_attack"'
-    samp_rate: samp_rate
-  states:
-    coordinate: [2592, 832]
-    rotation: 0
-    state: enabled
-- name: rx_fir
-  id: glidelink_lp_decim
-  parameters:
-    args: '"driver=glidelink,uri=ip:192.168.3.1"'
-    comment: 'low-pass, decimation by 2 (coefficients fixed in the image)'
-    slot: '-1'
-  states:
-    coordinate: [320, 832]
-    rotation: 0
-    state: enabled
-- name: agc
-  id: glidelink_agc
-  parameters:
-    args: '"driver=glidelink,uri=ip:192.168.3.1"'
-    comment: ''
-    gain: '1.0'
-    max_gain: '1000.0'
-    rate: 1e-3
-    reference: '0.5'
-    slot: '-1'
-  states:
-    coordinate: [816, 832]
-    rotation: 0
-    state: enabled
-- name: fll
-  id: glidelink_fll
-  parameters:
-    args: '"driver=glidelink,uri=ip:192.168.3.1"'
-    comment: ''
-    filter_size: '44'
-    rolloff: '0.35'
-    slot: '-1'
-    sps: rx_sps
-    w: 6.28 / 400
-  states:
-    coordinate: [1136, 832]
-    rotation: 0
-    state: enabled
-- name: mf
-  id: glidelink_rrc_mf
-  parameters:
-    args: '"driver=glidelink,uri=ip:192.168.3.1"'
-    comment: 'RRC matched filter at 2 samples per symbol (fixed in the image)'
-    slot: '-1'
-  states:
-    coordinate: [1464, 832]
-    rotation: 0
-    state: enabled
-- name: sym
-  id: glidelink_symsync
-  parameters:
-    args: '"driver=glidelink,uri=ip:192.168.3.1"'
-    comment: ''
-    damping: '0.707'
-    loop_bw: '0.01'
-    max_dev: '0.01'
-    slot: '-1'
-    ted_gain: '0.3'
-  states:
-    coordinate: [1920, 832]
-    rotation: 0
-    state: enabled
-- name: costas
-  id: glidelink_costas
-  parameters:
-    args: '"driver=glidelink,uri=ip:192.168.3.1"'
-    comment: ''
-    slot: '-1'
-    w: 6.28 / 200
-  states:
-    coordinate: [2264, 832]
-    rotation: 0
-    state: enabled
-- name: fll_freq
-  id: variable_function_probe
-  parameters:
-    block_id: fll
-    comment: FLL frequency register, read once a second
-    function_args: '''FREQ'''
-    function_name: read
-    poll_rate: '1'
-    value: '0'
-  states:
-    coordinate: [8, 344]
-    rotation: 0
-    state: enabled
-- name: sym_w
-  id: variable_function_probe
-  parameters:
-    block_id: sym
-    comment: ''
-    function_args: '''W'''
-    function_name: read
-    poll_rate: '1'
-    value: 2**23
-  states:
-    coordinate: [304, 344]
-    rotation: 0
-    state: enabled
-- name: costas_freq
-  id: variable_function_probe
-  parameters:
-    block_id: costas
-    comment: ''
-    function_args: '''FREQ'''
-    function_name: read
-    poll_rate: '1'
-    value: '0'
-  states:
-    coordinate: [496, 344]
-    rotation: 0
-    state: enabled
-- name: fll_khz
-  id: variable_qtgui_label
-  parameters:
-    comment: ''
-    formatter: None
-    gui_hint: 1,0,1,1
-    label: FLL frequency correction (kHz)
-    type: real
-    value: '((fll_freq - 2**32) if fll_freq >= 2**31 else fll_freq) / 2**32 * samp_rate / decim / 1e3'
-  states:
-    coordinate: [768, 176]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [480, 180.0]
     rotation: 0
     state: enabled
 - name: sym_ppm
@@ -368,57 +206,453 @@ blocks:
     type: real
     value: (sym_w / 2**23 - 1) * 1e6
   states:
-    coordinate: [1008, 176]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [560, 332.0]
     rotation: 0
     state: enabled
-- name: costas_hz
-  id: variable_qtgui_label
+- name: sym_w
+  id: variable_function_probe
+  parameters:
+    block_id: sym
+    comment: ''
+    function_args: '''W'''
+    function_name: read
+    poll_rate: '1'
+    value: 2**23
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1200, 336.0]
+    rotation: 0
+    state: enabled
+- name: tx_atten
+  id: variable_qtgui_range
   parameters:
     comment: ''
-    formatter: None
-    gui_hint: 2,0,1,1
-    label: Costas residual frequency (Hz)
-    type: real
-    value: '((costas_freq - 2**32) if costas_freq >= 2**31 else costas_freq) / 2**32 * samp_rate / sps'
+    gui_hint: 0,0,1,1
+    label: TX attenuation (dB)
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: '0'
+    step: '1'
+    stop: '89'
+    value: '40'
+    widget: counter_slider
   states:
-    coordinate: [1256, 176]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [64, 328.0]
     rotation: 0
     state: enabled
 - name: after
   id: qtgui_const_sink_x
   parameters:
+    affinity: ''
+    alias: ''
+    alpha1: '1.0'
+    alpha10: '1.0'
+    alpha2: '1.0'
+    alpha3: '1.0'
+    alpha4: '1.0'
+    alpha5: '1.0'
+    alpha6: '1.0'
+    alpha7: '1.0'
+    alpha8: '1.0'
+    alpha9: '1.0'
+    autoscale: 'False'
+    axislabels: 'True'
+    color1: '"blue"'
+    color10: '"dark blue"'
+    color2: '"red"'
+    color3: '"green"'
+    color4: '"black"'
+    color5: '"cyan"'
+    color6: '"magenta"'
+    color7: '"yellow"'
+    color8: '"dark red"'
+    color9: '"dark green"'
     comment: ''
     grid: 'True'
     gui_hint: 3,0,2,2
+    label1: ''
+    label10: ''
+    label2: ''
+    label3: ''
+    label4: ''
+    label5: ''
+    label6: ''
+    label7: ''
+    label8: ''
+    label9: ''
+    legend: 'True'
+    marker1: '0'
+    marker10: '0'
+    marker2: '0'
+    marker3: '0'
+    marker4: '0'
+    marker5: '0'
+    marker6: '0'
+    marker7: '0'
+    marker8: '0'
+    marker9: '0'
     name: '"Symbols from the PL receiver (AGC, FLL, matched filter, symbol sync, Costas)"'
     nconnections: '1'
     size: '2048'
+    style1: '0'
+    style10: '0'
+    style2: '0'
+    style3: '0'
+    style4: '0'
+    style5: '0'
+    style6: '0'
+    style7: '0'
+    style8: '0'
+    style9: '0'
+    tr_chan: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_slope: qtgui.TRIG_SLOPE_POS
+    tr_tag: '""'
     type: complex
     update_time: '0.10'
+    width1: '1'
+    width10: '1'
+    width2: '1'
+    width3: '1'
+    width4: '1'
+    width5: '1'
+    width6: '1'
+    width7: '1'
+    width8: '1'
+    width9: '1'
     xmax: '1'
     xmin: '-1'
     ymax: '1'
     ymin: '-1'
   states:
-    coordinate: [3040, 832]
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1560, 724.0]
+    rotation: 0
+    state: enabled
+- name: agc
+  id: glidelink_agc
+  parameters:
+    affinity: ''
+    alias: ''
+    args: '"driver=glidelink,uri=ip:192.168.3.1"'
+    comment: ''
+    gain: '1.0'
+    max_gain: '1000.0'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    rate: 1e-3
+    reference: '0.5'
+    slot: '-1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [440, 736.0]
+    rotation: 0
+    state: enabled
+- name: bits
+  id: analog_random_source_x
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    max: '256'
+    maxoutbuf: '0'
+    min: '0'
+    minoutbuf: '0'
+    num_samps: '10000'
+    repeat: 'True'
+    type: byte
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [64, 548.0]
+    rotation: 0
+    state: enabled
+- name: costas
+  id: glidelink_costas
+  parameters:
+    affinity: ''
+    alias: ''
+    args: '"driver=glidelink,uri=ip:192.168.3.1"'
+    comment: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    slot: '-1'
+    w: 6.28 / 200
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1256, 724.0]
+    rotation: 0
+    state: enabled
+- name: fll
+  id: glidelink_fll
+  parameters:
+    affinity: ''
+    alias: ''
+    args: '"driver=glidelink,uri=ip:192.168.3.1"'
+    comment: ''
+    filter_size: '44'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    rolloff: '0.35'
+    slot: '-1'
+    sps: rx_sps
+    w: 6.28 / 400
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [664, 896.0]
+    rotation: 0
+    state: enabled
+- name: mf
+  id: glidelink_rrc_mf
+  parameters:
+    affinity: ''
+    alias: ''
+    args: '"driver=glidelink,uri=ip:192.168.3.1"'
+    comment: RRC matched filter at 2 samples per symbol (fixed in the image)
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    slot: '-1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [744, 732.0]
+    rotation: 0
+    state: enabled
+- name: rx
+  id: glidelink_source
+  parameters:
+    address: '"192.168.3.1"'
+    affinity: ''
+    alias: ''
+    bandwidth: '0'
+    comment: 'host0_rx: one sample per symbol (samp_rate / sps) reaches the PC'
+    freq: freq
+    gain: rx_gain
+    gain_mode: '"slow_attack"'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samp_rate: samp_rate
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1400, 896.0]
+    rotation: 0
+    state: enabled
+- name: rx_fir
+  id: glidelink_lp_decim
+  parameters:
+    affinity: ''
+    alias: ''
+    args: '"driver=glidelink,uri=ip:192.168.3.1"'
+    comment: low-pass, decimation by 2 (coefficients fixed in the image)
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    slot: '-1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [104, 940.0]
+    rotation: 0
+    state: enabled
+- name: rx_radio
+  id: glidelink_radio
+  parameters:
+    address: '"192.168.3.1"'
+    affinity: ''
+    alias: ''
+    atten: '89'
+    bandwidth: '0'
+    comment: RX board RF
+    gain: rx_gain
+    gain_mode: '"slow_attack"'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    rx_freq: freq
+    samp_rate: samp_rate
+    tx_freq: '0'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [72, 708.0]
+    rotation: 0
+    state: enabled
+- name: scale
+  id: blocks_multiply_const_vxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: room for the RRC overshoot
+    const: '0.4'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    type: complex
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [584, 496.0]
+    rotation: 0
+    state: enabled
+- name: sym
+  id: glidelink_symsync
+  parameters:
+    affinity: ''
+    alias: ''
+    args: '"driver=glidelink,uri=ip:192.168.3.1"'
+    comment: ''
+    damping: '0.707'
+    loop_bw: '0.01'
+    max_dev: '0.01'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    slot: '-1'
+    ted_gain: '0.3'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1016, 896.0]
+    rotation: 0
+    state: enabled
+- name: symbols
+  id: digital_chunks_to_symbols_xx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    dimension: '1'
+    in_type: byte
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    num_ports: '1'
+    out_type: complex
+    symbol_table: qpsk.points()
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [456, 588.0]
+    rotation: 0
+    state: enabled
+- name: tx
+  id: glidelink_sink
+  parameters:
+    address: '"192.168.4.1"'
+    affinity: ''
+    alias: ''
+    atten: tx_atten
+    bandwidth: '0'
+    comment: 'symbols (1 per symbol, samp_rate / sps) into the PL: host0_tx'
+    freq: freq
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samp_rate: samp_rate
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [752, 552.0]
+    rotation: 0
+    state: enabled
+- name: tx_fir
+  id: glidelink_rrc_interp
+  parameters:
+    affinity: ''
+    alias: ''
+    args: '"driver=glidelink,uri=ip:192.168.4.1"'
+    comment: RRC pulse, interpolation by 4 (coefficients fixed in the image)
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    slot: '-1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1040, 500.0]
+    rotation: 0
+    state: enabled
+- name: tx_radio
+  id: glidelink_radio
+  parameters:
+    address: '"192.168.4.1"'
+    affinity: ''
+    alias: ''
+    atten: tx_atten
+    bandwidth: '0'
+    comment: TX board RF
+    gain: '0'
+    gain_mode: '"manual"'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    rx_freq: freq - 10e6
+    samp_rate: samp_rate
+    tx_freq: freq
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1480, 516.0]
+    rotation: 0
+    state: enabled
+- name: unpack
+  id: blocks_packed_to_unpacked_xx
+  parameters:
+    affinity: ''
+    alias: ''
+    bits_per_chunk: '2'
+    comment: ''
+    endianness: gr.GR_MSB_FIRST
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    num_ports: '1'
+    type: byte
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [240, 492.0]
     rotation: 0
     state: enabled
 
 connections:
-- [bits, '0', unpack, '0']
-- [unpack, '0', symbols, '0']
-- [symbols, '0', scale, '0']
-- [scale, '0', tx, '0']
-- [tx, '0', tx_fir, '0']
-- [tx_fir, '0', tx_radio, '0']
-- [rx_radio, '0', rx_fir, '0']
-- [rx_fir, '0', agc, '0']
 - [agc, '0', fll, '0']
+- [bits, '0', unpack, '0']
+- [costas, '0', rx, '0']
 - [fll, '0', mf, '0']
 - [mf, '0', sym, '0']
-- [sym, '0', costas, '0']
-- [costas, '0', rx, '0']
 - [rx, '0', after, '0']
+- [rx_fir, '0', agc, '0']
+- [rx_radio, '0', rx_fir, '0']
+- [scale, '0', tx, '0']
+- [sym, '0', costas, '0']
+- [symbols, '0', scale, '0']
+- [tx, '0', tx_fir, '0']
+- [tx_fir, '0', tx_radio, '0']
+- [unpack, '0', symbols, '0']
 
 metadata:
   file_format: 1

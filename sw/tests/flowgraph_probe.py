@@ -1,13 +1,16 @@
 """Run a GRC flowgraph with its windows and print, every 10 s, the sample rates the PC actually
 receives and sends and the EVM of the received symbols (docs/qpsk_tutorial.md):
 
-    python flowgraph_probe.py <flowgraph.grc> [--secs 60] [--rx rx] [--tx tx] [--symbols costas] [--shot out.png]
+    python flowgraph_probe.py <flowgraph.grc> [--secs 60] [--rx rx] [--tx tx] [--symbols costas] [--shot out.png] [--size 1300x1400]
 
 --rx / --tx: the flowgraph's GlideLink Source / Sink block ids; --symbols: the block whose output
 are the symbols (one per symbol, QPSK); by default the software Costas loop "costas", or the
 GlideLink Source when "costas" is a PL block (the PL sends the symbols). A rate below the one the
 flowgraph asks for means samples were lost (GNU Radio prints O for a receive overflow, U for a
-transmit underflow). --shot saves the flowgraph's window at the end. Run it in the "radioconda
+transmit underflow). --shot saves the flowgraph's window at the end, --size sets the window size
+(width x height in pixels); then the rows of the window that hold only sliders or labels keep
+their own height and the plots get the rest (for a screenshot: QT GUI blocks share the height
+equally by default). Run it in the "radioconda
 Prompt" (the SoapySDR modules need the environment).
 """
 import argparse
@@ -28,6 +31,7 @@ ap.add_argument("--rx", default="rx")
 ap.add_argument("--tx", default="tx")
 ap.add_argument("--symbols", default=None)
 ap.add_argument("--shot", default=None)
+ap.add_argument("--size", default=None)
 a = ap.parse_args()
 
 out = tempfile.mkdtemp(prefix="glidelink_probe_")
@@ -49,6 +53,15 @@ tb.connect(getattr(tb, name), keep, syms)
 if hasattr(tb, "flowgraph_started"):
     tb.flowgraph_started.set()
 tb.start()
+if a.size:
+    from gnuradio.qtgui import RangeWidget
+    grid = tb.top_grid_layout
+    for r in range(grid.rowCount()):
+        ws = [grid.itemAtPosition(r, c).widget() for c in range(grid.columnCount()) if grid.itemAtPosition(r, c)]
+        if ws and all(isinstance(w, (Qt.QToolBar, RangeWidget)) for w in ws if w is not None):
+            grid.setRowStretch(r, 0)
+    tb.setWindowState(Qt.Qt.WindowNoState)  # GRC restores the last geometry, possibly maximized
+    tb.resize(*(int(v) for v in a.size.lower().split("x")))
 tb.show()
 done = threading.Event()
 

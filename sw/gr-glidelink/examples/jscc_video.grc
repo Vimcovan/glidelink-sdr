@@ -3,33 +3,37 @@ options:
     author: GlideLink
     catch_exceptions: 'True'
     category: '[GRC Hier Blocks]'
-    description: Video from the PC through the offline DeepJSCC-Q link (TX board -> air -> RX board) and back, sent and decoded side by side
+    cmake_opt: ''
+    comment: ''
+    copyright: ''
+    description: Video from the PC through the offline DeepJSCC-Q link (TX board ->
+      air -> RX board) and back, sent and decoded side by side
+    gen_cmake: 'On'
+    gen_linking: dynamic
     generate_options: qt_gui
+    hier_block_src_path: '.:'
     id: glidelink_jscc_video
+    max_nouts: '0'
     output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
     run: 'True'
     run_command: '{python} -u {filename}'
     run_options: prompt
+    sizing_mode: fixed
+    thread_safe_setters: ''
     title: GlideLink video link
     window_size: (1200,1000)
   states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
     coordinate: [8, 8]
     rotation: 0
     state: enabled
 
 blocks:
-- name: video
-  id: parameter
-  parameters:
-    comment: video file on the PC (mp4, avi, mkv, ...), an image, a directory of images or a camera index
-    label: Video
-    short_id: v
-    type: str
-    value: ''
-  states:
-    coordinate: [220, 8]
-    rotation: 0
-    state: enabled
 - name: tx_att
   id: variable_qtgui_range
   parameters:
@@ -45,85 +49,209 @@ blocks:
     value: '10'
     widget: counter_slider
   states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
     coordinate: [400, 8]
-    rotation: 0
-    state: enabled
-- name: src
-  id: glidelink_video_file_source
-  parameters:
-    comment: ''
-    fps: '0'
-    repeat: 'True'
-    path: video
-  states:
-    coordinate: [8, 160]
-    rotation: 0
-    state: enabled
-- name: tx
-  id: glidelink_jscc_tx_sink
-  parameters:
-    att: tx_att
-    comment: TX board
-    host: '192.168.4.1'
-  states:
-    coordinate: [300, 130]
-    rotation: 0
-    state: enabled
-- name: rx
-  id: glidelink_jscc_rx_source
-  parameters:
-    comment: RX board
-    host: '192.168.3.1'
-  states:
-    coordinate: [8, 280]
-    rotation: 0
-    state: enabled
-- name: view
-  id: glidelink_video_sink
-  parameters:
-    comment: ''
-    gui_hint: 0,0,1,2
-    nconnections: '2'
-    zoom: '2'
-  states:
-    coordinate: [300, 230]
-    rotation: 0
-    state: enabled
-- name: symbols
-  id: glidelink_jscc_rx_symbols
-  parameters:
-    comment: ''
-    interval: '2.0'
-    rx_host: '192.168.3.1'
-  states:
-    coordinate: [8, 400]
     rotation: 0
     state: enabled
 - name: const
   id: qtgui_const_sink_x
   parameters:
+    affinity: ''
+    alias: ''
+    alpha1: '1.0'
+    alpha10: '1.0'
+    alpha2: '1.0'
+    alpha3: '1.0'
+    alpha4: '1.0'
+    alpha5: '1.0'
+    alpha6: '1.0'
+    alpha7: '1.0'
+    alpha8: '1.0'
+    alpha9: '1.0'
     autoscale: 'False'
+    axislabels: 'True'
+    color1: '"blue"'
+    color10: '"dark blue"'
+    color2: '"red"'
+    color3: '"green"'
+    color4: '"black"'
+    color5: '"cyan"'
+    color6: '"magenta"'
+    color7: '"yellow"'
+    color8: '"dark red"'
+    color9: '"dark green"'
     comment: ''
     grid: 'True'
     gui_hint: 1,1,2,1
+    label1: ''
+    label10: ''
+    label2: ''
+    label3: ''
+    label4: ''
+    label5: ''
+    label6: ''
+    label7: ''
+    label8: ''
+    label9: ''
+    legend: 'True'
+    marker1: '0'
+    marker10: '0'
+    marker2: '0'
+    marker3: '0'
+    marker4: '0'
+    marker5: '0'
+    marker6: '0'
+    marker7: '0'
+    marker8: '0'
+    marker9: '0'
     name: '"Receiver constellation (64-QAM)"'
     nconnections: '1'
     size: '8192'
+    style1: '0'
+    style10: '0'
+    style2: '0'
+    style3: '0'
+    style4: '0'
+    style5: '0'
+    style6: '0'
+    style7: '0'
+    style8: '0'
+    style9: '0'
+    tr_chan: '0'
+    tr_level: '0.0'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_slope: qtgui.TRIG_SLOPE_POS
+    tr_tag: '""'
     type: complex
     update_time: '0.5'
+    width1: '1'
+    width10: '1'
+    width2: '1'
+    width3: '1'
+    width4: '1'
+    width5: '1'
+    width6: '1'
+    width7: '1'
+    width8: '1'
+    width9: '1'
     xmax: '1.5'
     xmin: '-1.5'
     ymax: '1.5'
     ymin: '-1.5'
   states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
     coordinate: [300, 400]
+    rotation: 0
+    state: enabled
+- name: rx
+  id: glidelink_jscc_rx_source
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: RX board
+    host: 192.168.3.1
+    maxoutbuf: '0'
+    minoutbuf: '0'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 280]
+    rotation: 0
+    state: enabled
+- name: src
+  id: glidelink_video_file_source
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    fps: '0'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    path: /mnt/d/ClaudePrj/AD9361/demo_video/edit_v3/demo_v3.mp4
+    repeat: 'True'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 160]
+    rotation: 0
+    state: enabled
+- name: symbols
+  id: glidelink_jscc_rx_symbols
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    interval: '2.0'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    rx_host: 192.168.3.1
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 400]
+    rotation: 0
+    state: enabled
+- name: tx
+  id: glidelink_jscc_tx_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    att: tx_att
+    comment: TX board
+    host: 192.168.4.1
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [300, 130]
+    rotation: 0
+    state: enabled
+- name: video
+  id: parameter
+  parameters:
+    alias: ''
+    comment: video file on the PC (mp4, avi, mkv, ...), an image, a directory of images
+      or a camera index
+    hide: none
+    label: Video
+    short_id: v
+    type: str
+    value: ''
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [220, 8]
+    rotation: 0
+    state: enabled
+- name: view
+  id: glidelink_video_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    gui_hint: 0,0,1,2
+    nconnections: '2'
+    zoom: '2'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [300, 230]
     rotation: 0
     state: enabled
 
 connections:
+- [rx, '0', view, '1']
 - [src, '0', tx, '0']
 - [src, '0', view, '0']
-- [rx, '0', view, '1']
 - [symbols, '0', const, '0']
 
 metadata:

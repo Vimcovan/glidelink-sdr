@@ -6,10 +6,10 @@ options:
     cmake_opt: ''
     comment: ''
     copyright: ''
-    description: 'QPSK between the two boards at 20 MSPS (5 Msymbol/s), step 1 of docs/qpsk_tutorial.md:
-      ota_qpsk.grc with the TX pulse shaping in the PL (qpsk image): the PC sends the
-      symbols (5 MSPS), the TX board''s rrc_interp interpolates them by 4 with an RRC
-      pulse; the receiver is still all software at 20 MSPS.'
+    description: 'QPSK between the two boards at 20 MSPS (5 Msymbol/s), step 1 of
+      docs/qpsk_tutorial.md: ota_qpsk.grc with the TX pulse shaping in the PL (qpsk
+      image): the PC sends the symbols (5 MSPS), the TX board''s rrc_interp interpolates
+      them by 4 with an RRC pulse; the receiver is still all software at 20 MSPS.'
     gen_cmake: 'On'
     gen_linking: dynamic
     generate_options: qt_gui
@@ -31,7 +31,7 @@ options:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 8]
+    coordinate: [176, 48.0]
     rotation: 0
     state: enabled
 
@@ -45,7 +45,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [248, 8]
+    coordinate: [416, 52.0]
     rotation: 0
     state: enabled
 - name: qpsk
@@ -57,7 +57,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [424, 8]
+    coordinate: [592, 52.0]
     rotation: 0
     state: enabled
 - name: rrc_taps
@@ -69,7 +69,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [792, 8]
+    coordinate: [832, 52.0]
     rotation: 0
     state: enabled
 - name: rx_gain
@@ -90,7 +90,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1136, 8]
+    coordinate: [1264, 56.0]
     rotation: 0
     state: enabled
 - name: samp_rate
@@ -102,7 +102,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1312, 8]
+    coordinate: [1040, 52.0]
     rotation: 0
     state: enabled
 - name: sps
@@ -114,7 +114,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1456, 8]
+    coordinate: [1160, 52.0]
     rotation: 0
     state: enabled
 - name: tx_atten
@@ -135,7 +135,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1576, 8]
+    coordinate: [1408, 56.0]
     rotation: 0
     state: enabled
 - name: after
@@ -227,7 +227,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1576, 488]
+    coordinate: [1352, 780.0]
     rotation: 0
     state: enabled
 - name: agc
@@ -247,7 +247,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [304, 488]
+    coordinate: [472, 532.0]
     rotation: 0
     state: enabled
 - name: before
@@ -339,7 +339,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [592, 640]
+    coordinate: [760, 684.0]
     rotation: 0
     state: enabled
 - name: bits
@@ -359,7 +359,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 208]
+    coordinate: [176, 244.0]
     rotation: 0
     state: enabled
 - name: clock
@@ -382,7 +382,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [976, 488]
+    coordinate: [1024, 536.0]
     rotation: 0
     state: enabled
 - name: costas
@@ -400,7 +400,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1280, 488]
+    coordinate: [1368, 592.0]
     rotation: 0
     state: enabled
 - name: fll
@@ -420,7 +420,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [592, 488]
+    coordinate: [760, 528.0]
     rotation: 0
     state: enabled
 - name: rx
@@ -441,7 +441,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 488]
+    coordinate: [176, 528.0]
     rotation: 0
     state: enabled
 - name: scale
@@ -459,7 +459,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [824, 208]
+    coordinate: [600, 224.0]
     rotation: 0
     state: enabled
 - name: spectrum
@@ -540,7 +540,27 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [304, 640]
+    coordinate: [472, 676.0]
+    rotation: 0
+    state: enabled
+- name: symbols
+  id: digital_chunks_to_symbols_xx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    dimension: '1'
+    in_type: byte
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    num_ports: '1'
+    out_type: complex
+    symbol_table: qpsk.points()
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [448, 324.0]
     rotation: 0
     state: enabled
 - name: tx
@@ -560,7 +580,66 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1008, 208]
+    coordinate: [736, 304.0]
+    rotation: 0
+    state: enabled
+- name: tx_fir
+  id: glidelink_rrc_interp
+  parameters:
+    affinity: ''
+    alias: ''
+    args: '"driver=glidelink,uri=ip:192.168.4.1"'
+    comment: RRC pulse, interpolation by 4 (coefficients fixed in the image)
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    slot: '-1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [880, 204.0]
+    rotation: 0
+    state: enabled
+- name: tx_radio
+  id: glidelink_radio
+  parameters:
+    address: '"192.168.4.1"'
+    affinity: ''
+    alias: ''
+    atten: tx_atten
+    bandwidth: '0'
+    comment: TX board RF
+    gain: '0'
+    gain_mode: '"manual"'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    rx_freq: freq - 10e6
+    samp_rate: samp_rate
+    tx_freq: freq
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1256, 316.0]
+    rotation: 0
+    state: enabled
+- name: unpack
+  id: blocks_packed_to_unpacked_xx
+  parameters:
+    affinity: ''
+    alias: ''
+    bits_per_chunk: '2'
+    comment: ''
+    endianness: gr.GR_MSB_FIRST
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    num_ports: '1'
+    type: byte
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [368, 212.0]
     rotation: 0
     state: enabled
 - name: waterfall
@@ -621,97 +700,14 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [304, 792]
+    coordinate: [472, 836.0]
     rotation: 0
     state: enabled
 
-- name: unpack
-  id: blocks_packed_to_unpacked_xx
-  parameters:
-    affinity: ''
-    alias: ''
-    bits_per_chunk: '2'
-    comment: ''
-    endianness: gr.GR_MSB_FIRST
-    maxoutbuf: '0'
-    minoutbuf: '0'
-    num_ports: '1'
-    type: byte
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [192, 208]
-    rotation: 0
-    state: enabled
-- name: symbols
-  id: digital_chunks_to_symbols_xx
-  parameters:
-    affinity: ''
-    alias: ''
-    comment: ''
-    dimension: '1'
-    in_type: byte
-    maxoutbuf: '0'
-    minoutbuf: '0'
-    num_ports: '1'
-    out_type: complex
-    symbol_table: qpsk.points()
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [488, 208]
-    rotation: 0
-    state: enabled
-- name: tx_fir
-  id: glidelink_rrc_interp
-  parameters:
-    affinity: ''
-    alias: ''
-    args: '"driver=glidelink,uri=ip:192.168.4.1"'
-    comment: RRC pulse, interpolation by 4 (coefficients fixed in the image)
-    maxoutbuf: '0'
-    minoutbuf: '0'
-    slot: '-1'
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [1304, 208]
-    rotation: 0
-    state: enabled
-- name: tx_radio
-  id: glidelink_radio
-  parameters:
-    address: '"192.168.4.1"'
-    affinity: ''
-    alias: ''
-    atten: tx_atten
-    bandwidth: '0'
-    comment: TX board RF
-    gain: '0'
-    gain_mode: '"manual"'
-    maxoutbuf: '0'
-    minoutbuf: '0'
-    rx_freq: freq - 10e6
-    samp_rate: samp_rate
-    tx_freq: freq
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [1752, 208]
-    rotation: 0
-    state: enabled
 connections:
-- [bits, '0', unpack, '0']
-- [unpack, '0', symbols, '0']
-- [symbols, '0', scale, '0']
-- [tx, '0', tx_fir, '0']
-- [tx_fir, '0', tx_radio, '0']
 - [agc, '0', before, '0']
 - [agc, '0', fll, '0']
+- [bits, '0', unpack, '0']
 - [clock, '0', costas, '0']
 - [costas, '0', after, '0']
 - [fll, '0', clock, '0']
@@ -719,6 +715,10 @@ connections:
 - [rx, '0', spectrum, '0']
 - [rx, '0', waterfall, '0']
 - [scale, '0', tx, '0']
+- [symbols, '0', scale, '0']
+- [tx, '0', tx_fir, '0']
+- [tx_fir, '0', tx_radio, '0']
+- [unpack, '0', symbols, '0']
 
 metadata:
   file_format: 1
