@@ -45,7 +45,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [300, 8]
+    coordinate: [248, 8]
     rotation: 0
     state: enabled
 - name: qpsk
@@ -57,7 +57,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [480, 8]
+    coordinate: [424, 8]
     rotation: 0
     state: enabled
 - name: rrc_taps
@@ -69,7 +69,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [680, 8]
+    coordinate: [792, 8]
     rotation: 0
     state: enabled
 - name: rx_gain
@@ -90,7 +90,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [400, 90]
+    coordinate: [1136, 8]
     rotation: 0
     state: enabled
 - name: samp_rate
@@ -102,7 +102,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [200, 8]
+    coordinate: [1312, 8]
     rotation: 0
     state: enabled
 - name: sps
@@ -114,7 +114,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [400, 8]
+    coordinate: [1456, 8]
     rotation: 0
     state: enabled
 - name: tx_atten
@@ -135,7 +135,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [200, 90]
+    coordinate: [1576, 8]
     rotation: 0
     state: enabled
 - name: after
@@ -227,7 +227,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1080, 400]
+    coordinate: [1576, 488]
     rotation: 0
     state: enabled
 - name: agc
@@ -247,7 +247,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [240, 400]
+    coordinate: [304, 488]
     rotation: 0
     state: enabled
 - name: before
@@ -339,7 +339,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [420, 520]
+    coordinate: [592, 640]
     rotation: 0
     state: enabled
 - name: bits
@@ -359,7 +359,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 250]
+    coordinate: [8, 208]
     rotation: 0
     state: enabled
 - name: clock
@@ -382,7 +382,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [640, 400]
+    coordinate: [976, 488]
     rotation: 0
     state: enabled
 - name: costas
@@ -400,7 +400,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [880, 400]
+    coordinate: [1280, 488]
     rotation: 0
     state: enabled
 - name: fll
@@ -420,7 +420,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [420, 400]
+    coordinate: [592, 488]
     rotation: 0
     state: enabled
 - name: rx
@@ -441,7 +441,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [8, 400]
+    coordinate: [8, 488]
     rotation: 0
     state: enabled
 - name: scale
@@ -459,7 +459,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [420, 260]
+    coordinate: [824, 208]
     rotation: 0
     state: enabled
 - name: spectrum
@@ -540,7 +540,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [240, 520]
+    coordinate: [304, 640]
     rotation: 0
     state: enabled
 - name: tx
@@ -560,7 +560,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [560, 240]
+    coordinate: [1008, 208]
     rotation: 0
     state: enabled
 - name: waterfall
@@ -621,7 +621,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [240, 640]
+    coordinate: [304, 792]
     rotation: 0
     state: enabled
 
@@ -641,7 +641,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [224, 308.0]
+    coordinate: [192, 208]
     rotation: 0
     state: enabled
 - name: symbols
@@ -661,7 +661,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [536, 292.0]
+    coordinate: [488, 208]
     rotation: 0
     state: enabled
 - name: tx_fir
@@ -678,7 +678,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1256, 244.0]
+    coordinate: [1304, 208]
     rotation: 0
     state: enabled
 - name: tx_radio
@@ -701,7 +701,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1712, 236.0]
+    coordinate: [1752, 208]
     rotation: 0
     state: enabled
 connections:

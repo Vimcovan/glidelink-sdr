@@ -1,13 +1,14 @@
 """Run a GRC flowgraph with its windows and print, every 10 s, the sample rates the PC actually
 receives and sends and the EVM of the received symbols (docs/qpsk_tutorial.md):
 
-    python flowgraph_probe.py <flowgraph.grc> [--secs 60] [--rx rx] [--tx tx] [--symbols costas]
+    python flowgraph_probe.py <flowgraph.grc> [--secs 60] [--rx rx] [--tx tx] [--symbols costas] [--shot out.png]
 
 --rx / --tx: the flowgraph's GlideLink Source / Sink block ids; --symbols: the block whose output
 are the symbols (one per symbol, QPSK); by default the software Costas loop "costas", or the
 GlideLink Source when "costas" is a PL block (the PL sends the symbols). A rate below the one the
 flowgraph asks for means samples were lost (GNU Radio prints O for a receive overflow, U for a
-transmit underflow). Run it in the "radioconda Prompt" (the SoapySDR modules need the environment).
+transmit underflow). --shot saves the flowgraph's window at the end. Run it in the "radioconda
+Prompt" (the SoapySDR modules need the environment).
 """
 import argparse
 import importlib
@@ -26,6 +27,7 @@ ap.add_argument("--secs", type=int, default=60)
 ap.add_argument("--rx", default="rx")
 ap.add_argument("--tx", default="tx")
 ap.add_argument("--symbols", default=None)
+ap.add_argument("--shot", default=None)
 a = ap.parse_args()
 
 out = tempfile.mkdtemp(prefix="glidelink_probe_")
@@ -48,6 +50,22 @@ if hasattr(tb, "flowgraph_started"):
     tb.flowgraph_started.set()
 tb.start()
 tb.show()
+done = threading.Event()
+
+
+def finish():                               # in the GUI thread: the window shot, then stop
+    if not done.is_set():
+        return
+    if a.shot:
+        tb.grab().save(a.shot)
+    tb.stop()
+    tb.wait()
+    app.quit()
+
+
+timer = Qt.QTimer()
+timer.timeout.connect(finish)
+timer.start(200)
 
 
 def evm():
@@ -68,9 +86,7 @@ def report():
         print(f"t={10 * (k + 1):3d} s  PC receives {(r - lr) / 1e7:5.2f} MSPS, sends {(t - lt) / 1e7:5.2f} MSPS, "
               f"symbol EVM {evm():6.1f} dB", flush=True)
         lr, lt = r, t
-    tb.stop()
-    tb.wait()
-    app.quit()
+    done.set()
 
 
 threading.Thread(target=report, daemon=True).start()

@@ -27,7 +27,7 @@ blocks:
     comment: RF sample rate (both boards)
     value: 20e6
   states:
-    coordinate: [200, 8]
+    coordinate: [240, 8]
     rotation: 0
     state: enabled
 - name: sps
@@ -36,7 +36,7 @@ blocks:
     comment: 'samples per symbol at the RF rate (4, rrc_interp in the image)'
     value: '4'
   states:
-    coordinate: [320, 8]
+    coordinate: [456, 8]
     rotation: 0
     state: enabled
 - name: decim
@@ -45,7 +45,7 @@ blocks:
     comment: 'RX decimation in the PL (2, lp_decim in the image)'
     value: '2'
   states:
-    coordinate: [400, 8]
+    coordinate: [864, 8]
     rotation: 0
     state: enabled
 - name: rx_sps
@@ -54,7 +54,7 @@ blocks:
     comment: samples per symbol on the PC (RX)
     value: sps // decim
   states:
-    coordinate: [480, 8]
+    coordinate: [1200, 8]
     rotation: 0
     state: enabled
 - name: freq
@@ -63,7 +63,7 @@ blocks:
     comment: ''
     value: 915e6
   states:
-    coordinate: [580, 8]
+    coordinate: [1456, 8]
     rotation: 0
     state: enabled
 - name: qpsk
@@ -72,7 +72,7 @@ blocks:
     comment: ''
     value: digital.constellation_qpsk().base()
   states:
-    coordinate: [680, 8]
+    coordinate: [8, 176]
     rotation: 0
     state: enabled
 - name: tx_atten
@@ -90,7 +90,7 @@ blocks:
     value: '40'
     widget: counter_slider
   states:
-    coordinate: [200, 160]
+    coordinate: [376, 176]
     rotation: 0
     state: enabled
 - name: rx_gain
@@ -108,7 +108,7 @@ blocks:
     value: '40'
     widget: counter_slider
   states:
-    coordinate: [360, 160]
+    coordinate: [592, 176]
     rotation: 0
     state: enabled
 
@@ -123,7 +123,7 @@ blocks:
     repeat: 'True'
     type: byte
   states:
-    coordinate: [16, 280]
+    coordinate: [8, 552]
     rotation: 0
     state: enabled
 - name: unpack
@@ -135,7 +135,7 @@ blocks:
     num_ports: '1'
     type: byte
   states:
-    coordinate: [200, 280]
+    coordinate: [192, 552]
     rotation: 0
     state: enabled
 - name: symbols
@@ -148,7 +148,7 @@ blocks:
     out_type: complex
     symbol_table: qpsk.points()
   states:
-    coordinate: [380, 280]
+    coordinate: [488, 552]
     rotation: 0
     state: enabled
 - name: scale
@@ -159,7 +159,7 @@ blocks:
     type: complex
     vlen: '1'
   states:
-    coordinate: [560, 280]
+    coordinate: [824, 552]
     rotation: 0
     state: enabled
 - name: tx
@@ -172,7 +172,7 @@ blocks:
     freq: freq
     samp_rate: samp_rate
   states:
-    coordinate: [720, 260]
+    coordinate: [1048, 552]
     rotation: 0
     state: enabled
 - name: tx_fir
@@ -182,7 +182,7 @@ blocks:
     comment: 'RRC pulse, interpolation by 4 (coefficients fixed in the image)'
     slot: '-1'
   states:
-    coordinate: [920, 260]
+    coordinate: [1464, 552]
     rotation: 0
     state: enabled
 - name: tx_radio
@@ -198,7 +198,7 @@ blocks:
     samp_rate: samp_rate
     tx_freq: freq
   states:
-    coordinate: [1120, 260]
+    coordinate: [1904, 552]
     rotation: 0
     state: enabled
 
@@ -216,7 +216,7 @@ blocks:
     samp_rate: samp_rate
     tx_freq: '0'
   states:
-    coordinate: [16, 460]
+    coordinate: [8, 832]
     rotation: 0
     state: enabled
 - name: rx
@@ -230,7 +230,7 @@ blocks:
     gain_mode: '"slow_attack"'
     samp_rate: samp_rate
   states:
-    coordinate: [420, 440]
+    coordinate: [2592, 832]
     rotation: 0
     state: enabled
 - name: rx_fir
@@ -240,7 +240,7 @@ blocks:
     comment: 'low-pass, decimation by 2 (coefficients fixed in the image)'
     slot: '-1'
   states:
-    coordinate: [220, 460]
+    coordinate: [320, 832]
     rotation: 0
     state: enabled
 - name: agc
@@ -254,7 +254,7 @@ blocks:
     reference: '0.5'
     slot: '-1'
   states:
-    coordinate: [420, 460]
+    coordinate: [816, 832]
     rotation: 0
     state: enabled
 - name: fll
@@ -268,7 +268,7 @@ blocks:
     sps: rx_sps
     w: 6.28 / 400
   states:
-    coordinate: [620, 460]
+    coordinate: [1136, 832]
     rotation: 0
     state: enabled
 - name: mf
@@ -278,7 +278,7 @@ blocks:
     comment: 'RRC matched filter at 2 samples per symbol (fixed in the image)'
     slot: '-1'
   states:
-    coordinate: [820, 460]
+    coordinate: [1464, 832]
     rotation: 0
     state: enabled
 - name: sym
@@ -292,7 +292,7 @@ blocks:
     slot: '-1'
     ted_gain: '0.3'
   states:
-    coordinate: [1020, 460]
+    coordinate: [1920, 832]
     rotation: 0
     state: enabled
 - name: costas
@@ -303,7 +303,7 @@ blocks:
     slot: '-1'
     w: 6.28 / 200
   states:
-    coordinate: [1220, 460]
+    coordinate: [2264, 832]
     rotation: 0
     state: enabled
 - name: fll_freq
@@ -316,7 +316,7 @@ blocks:
     poll_rate: '1'
     value: '0'
   states:
-    coordinate: [16, 640]
+    coordinate: [8, 344]
     rotation: 0
     state: enabled
 - name: sym_w
@@ -329,7 +329,7 @@ blocks:
     poll_rate: '1'
     value: 2**23
   states:
-    coordinate: [200, 640]
+    coordinate: [304, 344]
     rotation: 0
     state: enabled
 - name: costas_freq
@@ -342,7 +342,7 @@ blocks:
     poll_rate: '1'
     value: '0'
   states:
-    coordinate: [380, 640]
+    coordinate: [496, 344]
     rotation: 0
     state: enabled
 - name: fll_khz
@@ -355,7 +355,7 @@ blocks:
     type: real
     value: '((fll_freq - 2**32) if fll_freq >= 2**31 else fll_freq) / 2**32 * samp_rate / decim / 1e3'
   states:
-    coordinate: [16, 720]
+    coordinate: [768, 176]
     rotation: 0
     state: enabled
 - name: sym_ppm
@@ -368,7 +368,7 @@ blocks:
     type: real
     value: (sym_w / 2**23 - 1) * 1e6
   states:
-    coordinate: [200, 720]
+    coordinate: [1008, 176]
     rotation: 0
     state: enabled
 - name: costas_hz
@@ -381,7 +381,7 @@ blocks:
     type: real
     value: '((costas_freq - 2**32) if costas_freq >= 2**31 else costas_freq) / 2**32 * samp_rate / sps'
   states:
-    coordinate: [380, 720]
+    coordinate: [1256, 176]
     rotation: 0
     state: enabled
 - name: after
@@ -400,7 +400,7 @@ blocks:
     ymax: '1'
     ymin: '-1'
   states:
-    coordinate: [620, 600]
+    coordinate: [3040, 832]
     rotation: 0
     state: enabled
 

@@ -52,15 +52,21 @@
 - 接收：GlideLink Source（接收板，20 MSPS）→ AGC → FLL Band-Edge（粗频偏）→ Polyphase Clock Sync（RRC 匹配滤波与符号定时，每符号输出一个点）
   → Costas Loop（相位与残余频偏）→ 星座图。频谱、瀑布图和同步前的星座接在 Source 与 AGC 后面。
 
+![第 0 步的流程图：上面一行发射，下面一行接收，全部在电脑上运行](img/qpsk_tutorial/step0_flowgraph.png)
+
 点运行（F6）。20 MSPS 下电脑跟不上：
 
 - 控制台一直打印 `sO`：`O` 是接收溢出，板上的 DMA 因为电脑读得慢而丢了样点。
 - 实测电脑起初每秒只收到约 12 MSPS，十几秒后接收完全停住，频谱、星座图不再刷新；发射也只送出 14～18 MSPS，空中信号时有时无。
   原因见 [`known_issues.md`](known_issues.md) 中 `ota_qpsk.grc` 一条：FLL 单核只能处理约 16 MSPS，信号断续又让时钟同步卡住。
 
+![第 0 步在 20 MSPS 下运行约 40 秒：瀑布图在 10 秒处停住，同步后的星座（右下）没有点](img/qpsk_tutorial/step0_run_20msps.png)
+
 把 `samp_rate` 改成 `5e6`（符号率随之降到 1.25 Msymbol/s）再运行，同一个流程图就能稳定工作：电脑收发各 5 MSPS，同步后的星座清晰，
 实测 EVM 约 −26 dB（带宽窄，噪声小，所以比后面 20 MSPS 的结果好）。流程图本身没有问题，问题是电脑要在 20 MSPS 上做全部处理。
 改回 `20e6`，接下来把处理搬到 PL。
+
+![同一流程图在 5 MSPS 下：同步后的四个星座点清晰](img/qpsk_tutorial/step0_run_5msps.png)
 
 ## 3. 第 1 步：发射成形滤波卸载到 PL（`ota_qpsk_pltx.grc`）
 
@@ -81,12 +87,16 @@
      其余保持默认。PL 链路的射频参数由它设置：橙色连线一直通到射频，射频的采样率、频率、衰减都在这个块上。
 3. 接收端不动。
 
+![第 1 步的流程图：发射链在 GlideLink Sink 之后用橙色连线接到 PL 中的成形滤波和射频](img/qpsk_tutorial/step1_flowgraph.png)
+
 运行。实测：
 
 - 电脑稳定发出 5 MSPS，发射端的处理不再受电脑限制。
 - 接收端仍然是 20 MSPS 的纯软件处理，控制台持续打印 `O`。三次运行中电脑每秒收到的样点分别约为 16.4、7.3、7.5 M（GNU Radio 每个块一个线程，
   落在能效核上的块更慢，所以每次不同）；第一次运行 35 秒左右进程崩溃，是丢样严重时 GNU Radio 时钟同步块的问题
   （[`known_issues.md`](known_issues.md) 中 `ota_qpsk.grc` 一条）。没崩溃时星座能锁上，EVM 约 −19 dB，但一直在丢样点。瓶颈在接收端。
+
+![第 1 步运行中：星座能锁上，但接收一直在丢样点](img/qpsk_tutorial/step1_run.png)
 
 ## 4. 第 2 步：接收抽取卸载到 PL（`ota_qpsk_pl.grc`）
 
@@ -107,7 +117,11 @@ PL 中的 `lp_decim` 做这一步，电脑只收一半的样点。
      （两板时钟偏差远小于这个值；保留 1.5 在每符号 2 个样点时会停在边界上假锁）。
    - 频谱、瀑布图的带宽改为 `samp_rate / decim`。
 
+![第 2 步的流程图：接收链先经 PL 中的射频和抽取，再到电脑](img/qpsk_tutorial/step2_flowgraph.png)
+
 运行。实测：电脑收 10 MSPS、发 5 MSPS，不再溢出，EVM 约 −19.5 dB。电脑端的 FLL、时钟同步、Costas 仍在运行，处理 10 MSPS 已经够用。
+
+![第 2 步运行中：频谱是抽取后的 10 MHz 带宽，同步后的星座清晰](img/qpsk_tutorial/step2_run.png)
 
 ## 5. 第 3 步：整个接收链卸载到 PL（`ota_qpsk_plrx.grc`）
 
@@ -129,16 +143,20 @@ Farrow 插值找符号时刻，每个符号输出一个点。
 3. Source 的白色输出现在就是符号，接一个 QT GUI Constellation Sink 看星座。
 4. （可选）看各环路的状态：PL 块可以读模块的寄存器。加一个 Function Probe，`Block ID` 填 `fll`（FLL 块的 ID），`Function Name` 填 `read`，
    `Function Args` 填 `'FREQ'`，再用 QT GUI Label 显示换算后的值；`ota_qpsk_plrx.grc` 中有 FLL 频率、符号时钟偏差、Costas 频率三个读数。
-   FLL 与 Costas 的频率读数大小相近、方向相抵（各约 55 kHz），原因见 [`known_issues.md`](known_issues.md) 中带边 FLL 一条，星座不受影响。
+   FLL 与 Costas 的频率读数大小相近、方向相抵（实测各约 50～70 kHz，每次运行不同），原因见 [`known_issues.md`](known_issues.md) 中带边 FLL 一条，星座不受影响。
+
+![第 3 步的流程图：接收链从射频到 Costas 全部用橙色连线接在 PL 中，电脑只收符号](img/qpsk_tutorial/step3_flowgraph.png)
 
 运行。实测：电脑收 5 MSPS（每符号一个点）、发 5 MSPS，EVM 约 −19.6 dB，和第 2 步电脑端处理的结果一样。
+
+![第 3 步运行中：PL 送来的符号，上方是 FLL 与 Costas 的频率读数](img/qpsk_tutorial/step3_run.png)
 
 至此电脑只做两件事：产生要发的符号，显示收到的符号。镜像里的全部 PL 模块共用 42 个 DSP（`fll` 20 个，其余每个 1～6 个）。
 
 ## 6. 自己测速率和 EVM
 
 GRC 本身不显示电脑实际收发的速率。`sw/tests/flowgraph_probe.py` 运行一个流程图（照常打开窗口），每 10 秒打印一次电脑收、发的速率和
-符号的 EVM。在 "radioconda Prompt" 中：
+符号的 EVM；加 `--shot 文件名.png` 在结束时保存窗口截图（本教程的运行截图就是这样截的）。在 "radioconda Prompt" 中：
 
 ```bash
 python sw/tests/flowgraph_probe.py sw/gr-glidelink/examples/ota_qpsk_pl.grc --secs 60
